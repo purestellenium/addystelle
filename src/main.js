@@ -32,9 +32,12 @@ k.loadSprite("twiggy", "sprites/Twiggy_spritesheet.png", {
 // to repeat) while groundLeft/Right keep the grass edge on their outer side.
 // legLeft/legRight are the floating-island pedestal legs, cropped from
 // beneath that same slab. tree/bush are just scenery, no collision.
-const EDGE_W = 24; // groundLeft/Right width (8px grass edge + one dirt period)
-const MID_W = 16; // groundMid width (one dirt period)
-const TILE_H = 40;
+const PLATFORM_SCALE = 2; // draw the tiles larger than their native pixels
+const EDGE_W = 16; // groundLeft/Right width — inner cut lands in pure dirt so
+//                    the grass edge butts seamlessly against the dirt mids
+const MID_W = 16; // groundMid width (pure-interior dirt strip, repeatable)
+const TILE_H = 30; // grass+dirt cap height (fence excluded, legs hang below)
+const LEG_W = 20; // pedestal leg sprite width
 k.loadSprite("groundLeft", "sprites/groundLeft.png");
 k.loadSprite("groundMid", "sprites/groundMid.png");
 k.loadSprite("groundRight", "sprites/groundRight.png");
@@ -94,6 +97,9 @@ function makePlatform(x, y, midCount) {
   const w = EDGE_W * 2 + MID_W * midCount;
   const platform = k.add([
     k.pos(x, y),
+    // scale() cascades to the tile children AND the collider, so tiles + physics
+    // stay in sync; all child coords below stay in native (unscaled) tile units.
+    k.scale(PLATFORM_SCALE),
     k.area({ shape: new k.Rect(k.vec2(0), w, TILE_H) }),
     k.body({ isStatic: true }),
     "platform",
@@ -110,26 +116,19 @@ function makePlatform(x, y, midCount) {
 // reads as a floating island instead of a slab that just stops mid-air.
 function makeFloatingPlatform(x, y, midCount) {
   const { platform, width } = makePlatform(x, y, midCount);
-  platform.add([k.pos(0, TILE_H), k.sprite("legLeft")]);
-  platform.add([k.pos(width - 16, TILE_H), k.sprite("legRight")]);
   return platform;
 }
 
 // Ground spans the bottom, flat and grounded; floating platforms climb up
-// from there, each a distinct hovering island.
-const groundY = k.height() - TILE_H;
-makePlatform(0, groundY, Math.ceil((k.width() - EDGE_W * 2) / MID_W) + 1);
-makeFloatingPlatform(180, groundY - 130, 9);
-makeFloatingPlatform(470, groundY - 250, 9);
-makeFloatingPlatform(150, groundY - 370, 6);
-
-// --- Scenery ---
-// Purely decorative — no area/body, so they don't affect collision.
-// anchor("bot") keeps their feet planted on the ground regardless of scale.
-k.add([k.sprite("tree"), k.pos(40, groundY), k.anchor("bot"), k.scale(1.5)]);
-k.add([k.sprite("bush"), k.pos(340, groundY), k.anchor("bot")]);
-k.add([k.sprite("tree"), k.pos(620, groundY), k.anchor("bot")]);
-k.add([k.sprite("bush"), k.pos(720, groundY), k.anchor("bot"), k.scale(1.3)]);
+// from there, each a distinct hovering island. Tiles render at PLATFORM_SCALE,
+// so world sizes are the native units times that factor.
+const groundY = k.height() - TILE_H * PLATFORM_SCALE;
+const groundMids =
+  Math.ceil((k.width() / PLATFORM_SCALE - EDGE_W * 2) / MID_W) + 1;
+makePlatform(0, groundY, groundMids);
+makeFloatingPlatform(180, groundY - 120, 6);
+makeFloatingPlatform(520, groundY - 260, 6);
+makeFloatingPlatform(180, groundY - 390, 4);
 
 // --- Controls ---
 let facing = 1; // last horizontal direction, used for flip + default dash aim
