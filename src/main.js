@@ -40,6 +40,7 @@ const DASH_FREEZE = 0.07; // brief hang before the burst — kills momentum firs
 const DASH_SPEED = 820; // horizontal speed during a dash (px/s)
 const DASH_DURATION = 0.14; // how long the burst lasts (s)
 const DASH_COOLDOWN = 0.45; // time before you can dash again (s)
+const DASH_VERTICAL_SCALE = 0.5; // cut vertical reach of up/diagonal dashes
 
 k.setGravity(1600);
 
@@ -90,7 +91,9 @@ for (const [x, y, w, h] of platforms) {
 }
 
 // --- Controls ---
-let facing = 1; // last horizontal direction, used to aim the dash
+let facing = 1; // last horizontal direction, used for flip + default dash aim
+let dashDir = k.vec2(1, 0); // aimed direction of the current dash
+let dashReady = true; // one dash per airtime — refills on touching ground
 let freezeTimer = 0; // remaining pre-dash hang (s)
 let dashTimer = 0; // remaining dash burst (s)
 let dashCooldown = 0; // remaining cooldown before next dash (s)
@@ -108,14 +111,15 @@ player.onUpdate(() => {
     player.gravityScale = 0;
     player.vel = k.vec2(0, 0);
   } else if (dashTimer > 0) {
-    // Burst: pure horizontal, no gravity, movement input ignored.
+    // Burst: fly along the aimed direction, no gravity, input ignored.
     dashTimer -= k.dt();
     player.gravityScale = 0;
-    player.vel = k.vec2(facing * DASH_SPEED, 0);
+    player.vel = dashDir.scale(DASH_SPEED);
   } else {
     // Normal movement — physics fully resumed.
     player.gravityScale = 1;
     player.vel.x = dir * MOVE_SPEED;
+    if (player.isGrounded()) dashReady = true; // refill dash on the ground
   }
 
   // --- Animation state ---
@@ -131,13 +135,26 @@ player.onUpdate(() => {
   }
 });
 
-// Shift: dash in the facing direction (freeze first, then burst).
+// Shift: 8-directional dash aimed by held WASD (freeze first, then burst).
 k.onKeyPress("shift", () => {
-  if (dashCooldown <= 0 && freezeTimer <= 0 && dashTimer <= 0) {
-    freezeTimer = DASH_FREEZE;
-    dashTimer = DASH_DURATION;
-    dashCooldown = DASH_COOLDOWN + DASH_FREEZE;
-  }
+  // Air-only, one dash per airtime.
+  if (!dashReady || player.isGrounded()) return;
+  if (dashCooldown > 0 || freezeTimer > 0 || dashTimer > 0) return;
+
+  const dx = (k.isKeyDown("d") ? 1 : 0) - (k.isKeyDown("a") ? 1 : 0);
+  const dy = (k.isKeyDown("s") ? 1 : 0) - (k.isKeyDown("w") ? 1 : 0);
+  if (dx === 0 && dy < 0) return; // no straight-up dash
+
+  // Normalize so diagonals aren't faster; default to facing if no input.
+  const aim = dx === 0 && dy === 0 ? k.vec2(facing, 0) : k.vec2(dx, dy).unit();
+  // Cut the vertical component so up/diagonal dashes give little lift.
+  dashDir = k.vec2(aim.x, aim.y * DASH_VERTICAL_SCALE);
+  if (dashDir.x !== 0) facing = dashDir.x > 0 ? 1 : -1; // face the dash
+
+  dashReady = false; // consumed until we land again
+  freezeTimer = DASH_FREEZE;
+  dashTimer = DASH_DURATION;
+  dashCooldown = DASH_COOLDOWN + DASH_FREEZE;
 });
 
 // Timers powering coyote time and jump buffering.
@@ -185,7 +202,7 @@ player.onUpdate(() => {
 
 // --- HUD ---
 k.add([
-  k.text("A/D to move, W/Space to jump, Shift to dash", { size: 18 }),
+  k.text("A/D move, W/Space jump, Shift dash (aim with WASD)", { size: 18 }),
   k.pos(12, 12),
   k.color(40, 40, 40),
   k.fixed(),
