@@ -7,16 +7,6 @@ const k = kaplay({
 
 k.loadRoot("./"); // A good idea for Itch.io publishing later
 
-k.loadSprite(
-  "bgShroom",
-  "platformerGraphics_mushroomLand/Backgrounds/bg_shroom.png",
-);
-k.add([
-  k.sprite("bgShroom", { width: k.width(), height: k.height() }),
-  k.pos(0, 0),
-  k.z(-999),
-]);
-
 // Twiggy: a 12x6 grid of 32x32 frames. KAPLAY slices it natively — no need
 // to split the sheet into separate files. Filled frames by index:
 //   row 2: 25-34  (front idle / emotes)
@@ -35,25 +25,23 @@ k.loadSprite("twiggy", "sprites/Twiggy_spritesheet.png", {
   },
 });
 
-// Mushroom-cap platform tiles: each piece is a 70x70 canvas but the drawn
-// cap only fills the top 40px (rows 40-69 are transparent padding), so
-// Left/Mid/Right tile edge-to-edge to build a cap of any width.
-const MUSHROOM_TILE = 70;
-const MUSHROOM_CAP_H = 40;
-const MUSHROOM_COLORS = [
-  "shroomBrown",
-  "shroomRed",
-  "shroomTan",
-  "shroomBrownSpots",
-];
-for (const color of MUSHROOM_COLORS) {
-  for (const part of ["Left", "Mid", "Right"]) {
-    k.loadSprite(
-      `${color}${part}`,
-      `platformerGraphics_mushroomLand/PNG/${color}${part}.png`,
-    );
-  }
-}
+// Ground + platform pieces cropped out of Tiles.png's top-left (grassland)
+// style, all 40px tall. The source slab is a rounded dirt mound, so its
+// grass-edge sides only belong at the two true ends of a platform — groundMid
+// is cropped from the pure-dirt middle (one 16px fleck-pattern period, safe
+// to repeat) while groundLeft/Right keep the grass edge on their outer side.
+// legLeft/legRight are the floating-island pedestal legs, cropped from
+// beneath that same slab. tree/bush are just scenery, no collision.
+const EDGE_W = 24; // groundLeft/Right width (8px grass edge + one dirt period)
+const MID_W = 16; // groundMid width (one dirt period)
+const TILE_H = 40;
+k.loadSprite("groundLeft", "sprites/groundLeft.png");
+k.loadSprite("groundMid", "sprites/groundMid.png");
+k.loadSprite("groundRight", "sprites/groundRight.png");
+k.loadSprite("legLeft", "sprites/legLeft.png");
+k.loadSprite("legRight", "sprites/legRight.png");
+k.loadSprite("tree", "sprites/tree.png");
+k.loadSprite("bush", "sprites/bush.png");
 
 // --- Tuning ---
 const MOVE_SPEED = 240; // horizontal speed (px/s)
@@ -99,31 +87,49 @@ function setAnim(name) {
 }
 
 // --- Platforms ---
-// One invisible static collider (sized to the visible cap, not the full tile)
-// with Left/Mid/Right mushroom tiles laid on top as children.
-function makePlatform(x, y, tilesWide, color = "shroomBrown") {
-  const w = tilesWide * MUSHROOM_TILE;
+// One invisible static collider spanning the full width, with groundLeft +
+// groundMid*N + groundRight laid edge-to-edge on top as children — grass
+// only shows on the two outer edges, solid dirt everywhere in between.
+function makePlatform(x, y, midCount) {
+  const w = EDGE_W * 2 + MID_W * midCount;
   const platform = k.add([
     k.pos(x, y),
-    // Collider matches the drawn cap (top ~40px); the tile's lower 30px is
-    // transparent, so a full-tile collider would block/bonk in empty air.
-    k.area({ shape: new k.Rect(k.vec2(0), w, MUSHROOM_CAP_H) }),
+    k.area({ shape: new k.Rect(k.vec2(0), w, TILE_H) }),
     k.body({ isStatic: true }),
     "platform",
   ]);
-  for (let i = 0; i < tilesWide; i++) {
-    const part = i === 0 ? "Left" : i === tilesWide - 1 ? "Right" : "Mid";
-    platform.add([k.pos(i * MUSHROOM_TILE, 0), k.sprite(color + part)]);
+  platform.add([k.pos(0, 0), k.sprite("groundLeft")]);
+  for (let i = 0; i < midCount; i++) {
+    platform.add([k.pos(EDGE_W + i * MID_W, 0), k.sprite("groundMid")]);
   }
+  platform.add([k.pos(w - EDGE_W, 0), k.sprite("groundRight")]);
+  return { platform, width: w };
+}
+
+// Same as makePlatform, but hangs pedestal legs under the end tiles so it
+// reads as a floating island instead of a slab that just stops mid-air.
+function makeFloatingPlatform(x, y, midCount) {
+  const { platform, width } = makePlatform(x, y, midCount);
+  platform.add([k.pos(0, TILE_H), k.sprite("legLeft")]);
+  platform.add([k.pos(width - 16, TILE_H), k.sprite("legRight")]);
   return platform;
 }
 
-// Ground spans the bottom; floating platforms climb up in different colours.
-const groundY = k.height() - MUSHROOM_TILE;
-makePlatform(0, groundY, Math.ceil(k.width() / MUSHROOM_TILE) + 1, "shroomBrown");
-makePlatform(180, groundY - 130, 3, "shroomTan");
-makePlatform(470, groundY - 250, 3, "shroomRed");
-makePlatform(150, groundY - 370, 2, "shroomBrownSpots");
+// Ground spans the bottom, flat and grounded; floating platforms climb up
+// from there, each a distinct hovering island.
+const groundY = k.height() - TILE_H;
+makePlatform(0, groundY, Math.ceil((k.width() - EDGE_W * 2) / MID_W) + 1);
+makeFloatingPlatform(180, groundY - 130, 9);
+makeFloatingPlatform(470, groundY - 250, 9);
+makeFloatingPlatform(150, groundY - 370, 6);
+
+// --- Scenery ---
+// Purely decorative — no area/body, so they don't affect collision.
+// anchor("bot") keeps their feet planted on the ground regardless of scale.
+k.add([k.sprite("tree"), k.pos(40, groundY), k.anchor("bot"), k.scale(1.5)]);
+k.add([k.sprite("bush"), k.pos(340, groundY), k.anchor("bot")]);
+k.add([k.sprite("tree"), k.pos(620, groundY), k.anchor("bot")]);
+k.add([k.sprite("bush"), k.pos(720, groundY), k.anchor("bot"), k.scale(1.3)]);
 
 // --- Controls ---
 let facing = 1; // last horizontal direction, used for flip + default dash aim
