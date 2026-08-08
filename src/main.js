@@ -125,7 +125,8 @@ let peakY = groundY;
 
 function spawnNextPlatform() {
   const move = MOVES[Math.floor(Math.random() * MOVES.length)];
-  const midCount = MIN_MID + Math.floor(Math.random() * (MAX_MID - MIN_MID + 1));
+  const midCount =
+    MIN_MID + Math.floor(Math.random() * (MAX_MID - MIN_MID + 1));
   const newW = (EDGE_W * 2 + MID_W * midCount) * PLATFORM_SCALE;
   const dy = Math.max(
     PLATFORM_H,
@@ -301,3 +302,76 @@ k.add([
   k.color(40, 40, 40),
   k.fixed(),
 ]);
+
+// --- AITA ticker ---
+// Reddit's JSON API 403s unauthenticated cross-origin requests outright and
+// sends no Access-Control-Allow-Origin header, so a plain fetch() from the
+// browser can never read the response — this goes through a public CORS
+// proxy instead. That proxy is a soft dependency: Reddit's bot-blocking has
+// been seen to catch proxy traffic too, and free proxies go down on their
+// own. Either failure just leaves FALLBACK_TITLES showing — never an error,
+// never a broken ticker, just a quiet fallback.
+const REDDIT_PROXY = "https://api.allorigins.win/raw?url=";
+const REDDIT_URL =
+  "https://www.reddit.com/r/AmItheAsshole/top.json?limit=15&t=day";
+const FALLBACK_TITLES = [
+  "(couldn't reach r/AmItheAsshole — showing placeholders)",
+  "AITA for eating the last slice of pizza I'd labeled with my name?",
+  "AITA for telling my roommate the plant is fake and always has been?",
+  "AITA for refusing to swap seats on a 3 hour flight?",
+  "AITA for skipping my cousin's fourth wedding this year?",
+];
+
+const TICKER_WIDTH = 260;
+const TICKER_SPEED = 30; // px/s, scrolling upward
+const TICKER_ROW_H = 100; // fixed slot height per title (generous for wrapped text)
+
+k.add([
+  k.rect(TICKER_WIDTH, k.height()),
+  k.pos(k.width() - TICKER_WIDTH, 0),
+  k.color(20, 20, 30),
+  k.opacity(0.55),
+  k.fixed(),
+  k.z(50),
+]);
+
+const ticker = k.add([
+  k.pos(k.width() - TICKER_WIDTH + 12, k.height()),
+  k.fixed(),
+  k.z(51),
+]);
+let tickerLoopHeight = 0;
+
+function setTickerTitles(titles) {
+  ticker.removeAll();
+  // Render the list twice back-to-back so wrapping from the bottom of the
+  // second copy back to the top of the first reads as a seamless loop.
+  for (const title of [...titles, ...titles]) {
+    ticker.add([
+      k.text(title, { size: 14, width: TICKER_WIDTH - 24 }),
+      k.pos(0, ticker.children.length * TICKER_ROW_H),
+      k.color(255, 255, 255),
+    ]);
+  }
+  tickerLoopHeight = titles.length * TICKER_ROW_H;
+  ticker.pos.y = k.height();
+}
+
+setTickerTitles(FALLBACK_TITLES);
+
+ticker.onUpdate(() => {
+  ticker.pos.y -= TICKER_SPEED * k.dt();
+  if (ticker.pos.y <= k.height() - tickerLoopHeight) {
+    ticker.pos.y += tickerLoopHeight;
+  }
+});
+
+fetch(REDDIT_PROXY + encodeURIComponent(REDDIT_URL))
+  .then((res) => res.json())
+  .then((json) => {
+    const titles = (json?.data?.children ?? [])
+      .map((post) => post?.data?.title)
+      .filter(Boolean);
+    if (titles.length > 0) setTickerTitles(titles);
+  })
+  .catch(() => {}); // Reddit/proxy unreachable — FALLBACK_TITLES stays up.
