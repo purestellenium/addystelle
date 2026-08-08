@@ -6,7 +6,6 @@ const k = kaplay({
 });
 
 k.loadRoot("./"); // A good idea for Itch.io publishing later
-k.loadSprite("bean", "sprites/bean.png");
 
 // Twiggy: a 12x6 grid of 32x32 frames. KAPLAY slices it natively — no need
 // to split the sheet into separate files. Filled frames by index:
