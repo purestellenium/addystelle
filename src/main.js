@@ -47,7 +47,12 @@ k.setGravity(1600);
 const player = k.add([
   k.sprite("twiggy", { anim: "idle" }),
   k.pos(120, 80),
-  k.area({ scale: 0.7 }), // tighter hitbox than the sprite's transparent padding
+  // Hitbox tuned to the character within the 32px cell (anchor = center, so
+  // local Y runs -16 at the top to +16 at the feet). Content spans ~y=5..32,
+  // i.e. local -11..+16. Height scale 0.85 -> 27px tall (spans ±13.6); offset
+  // +2.4 slides that down so the bottom lands on the feet and the top meets
+  // the head instead of empty space. Width 0.7 trims the side padding.
+  k.area({ scale: k.vec2(0.7, 0.85), offset: k.vec2(0, 2.4) }),
   k.body(),
   k.anchor("center"),
   k.scale(2),
@@ -126,8 +131,8 @@ player.onUpdate(() => {
   }
 });
 
-// Space: dash in the facing direction (freeze first, then burst).
-k.onKeyPress("space", () => {
+// Shift: dash in the facing direction (freeze first, then burst).
+k.onKeyPress("shift", () => {
   if (dashCooldown <= 0 && freezeTimer <= 0 && dashTimer <= 0) {
     freezeTimer = DASH_FREEZE;
     dashTimer = DASH_DURATION;
@@ -154,6 +159,7 @@ player.onUpdate(() => {
 });
 
 k.onKeyPress("w", requestJump);
+k.onKeyPress("space", requestJump);
 
 function requestJump() {
   bufferTimer = JUMP_BUFFER;
@@ -167,6 +173,7 @@ function cutJump() {
 }
 
 k.onKeyRelease("w", cutJump);
+k.onKeyRelease("space", cutJump);
 
 // --- Fall off screen = respawn ---
 player.onUpdate(() => {
@@ -178,7 +185,7 @@ player.onUpdate(() => {
 
 // --- HUD ---
 k.add([
-  k.text("A/D to move, W to jump, Space to dash", { size: 18 }),
+  k.text("A/D to move, W/Space to jump, Shift to dash", { size: 18 }),
   k.pos(12, 12),
   k.color(40, 40, 40),
   k.fixed(),
