@@ -177,7 +177,7 @@ player.onUpdate(() => {
 });
 
 // Shift: 8-directional dash aimed by held WASD (freeze first, then burst).
-k.onKeyPress("shift", () => {
+k.onKeyPress("k", () => {
   // Air-only, one dash per airtime.
   if (!dashReady || player.isGrounded()) return;
   if (dashCooldown > 0 || freezeTimer > 0 || dashTimer > 0) return;
@@ -243,7 +243,7 @@ player.onUpdate(() => {
 
 // --- HUD ---
 k.add([
-  k.text("A/D move, W/Space jump, Shift dash (aim with WASD)", { size: 18 }),
+  k.text("A/D move, W/Space jump, K dash (aim with WASD)", { size: 18 }),
   k.pos(12, 12),
   k.color(40, 40, 40),
   k.fixed(),
