@@ -7,6 +7,16 @@ const k = kaplay({
 
 k.loadRoot("./"); // A good idea for Itch.io publishing later
 
+k.loadSprite(
+  "bgShroom",
+  "platformerGraphics_mushroomLand/Backgrounds/bg_shroom.png",
+);
+k.add([
+  k.sprite("bgShroom", { width: k.width(), height: k.height() }),
+  k.pos(0, 0),
+  k.z(-999),
+]);
+
 // Twiggy: a 12x6 grid of 32x32 frames. KAPLAY slices it natively — no need
 // to split the sheet into separate files. Filled frames by index:
 //   row 2: 25-34  (front idle / emotes)
@@ -25,24 +35,33 @@ k.loadSprite("twiggy", "sprites/Twiggy_spritesheet.png", {
   },
 });
 
-// Mushroom-land platform tiles (Kenney pack, 70x70 each). Each colour has a
-// rounded Left cap, a repeating Mid (+MidAlt for variety), and a Right cap.
-const TILE_ART = "platformerGraphics_mushroomLand/PNG/";
-const TILE_COLORS = { tan: "shroomTan", brown: "shroomBrown", red: "shroomRed" };
-for (const prefix of Object.values(TILE_COLORS)) {
-  for (const part of ["Left", "Mid", "MidAlt", "Right"]) {
-    k.loadSprite(prefix + part, `${TILE_ART}${prefix}${part}.png`);
+// Mushroom-cap platform tiles: each piece is a 70x70 canvas but the drawn
+// cap only fills the top 40px (rows 40-69 are transparent padding), so
+// Left/Mid/Right tile edge-to-edge to build a cap of any width.
+const MUSHROOM_TILE = 70;
+const MUSHROOM_CAP_H = 40;
+const MUSHROOM_COLORS = [
+  "shroomBrown",
+  "shroomRed",
+  "shroomTan",
+  "shroomBrownSpots",
+];
+for (const color of MUSHROOM_COLORS) {
+  for (const part of ["Left", "Mid", "Right"]) {
+    k.loadSprite(
+      `${color}${part}`,
+      `platformerGraphics_mushroomLand/PNG/${color}${part}.png`,
+    );
   }
 }
 
 // --- Tuning ---
 const MOVE_SPEED = 240; // horizontal speed (px/s)
 const JUMP_FORCE = 640; // initial jump velocity
-const TILE = 70; // mushroom-land tile size (px)
-const CAP_H = 40; // visible mushroom cap fills only the top ~40px of each tile
+const FLOOR_HEIGHT = 48;
 
 // Feel tuning
-const COYOTE_TIME = 0.1; // grace period to still jump after leaving a ledge (s)
+const COYOTE_TIME = 0.01; // grace period to still jump after leaving a ledge (s)
 const JUMP_BUFFER = 0.1; // press jump this early before landing and it still fires (s)
 const JUMP_CUT = 0.4; // release jump early -> keep this fraction of upward velocity
 
@@ -81,35 +100,27 @@ function setAnim(name) {
 }
 
 // --- Platforms ---
-// One invisible static collider spanning the whole platform, with 70px tile
-// sprites laid on top as children: Left cap, tiling Mids, Right cap.
-function makePlatform(x, y, tilesWide, color = "tan") {
-  const prefix = TILE_COLORS[color];
-  const w = tilesWide * TILE;
-  const platform = k.add([
+// [x, y, width, height]
+const platforms = [
+  [0, k.height() - FLOOR_HEIGHT, k.width(), FLOOR_HEIGHT], // ground
+  [180, k.height() - 160, 160, 24],
+  [420, k.height() - 260, 160, 24],
+  [120, k.height() - 360, 160, 24],
+];
+
+for (const [x, y, w, h] of platforms) {
+  k.add([
+    k.rect(w, h),
     k.pos(x, y),
     // Collider matches the visible cap (top ~40px); the tile's lower 30px is
     // transparent, so a full-tile collider would block/bonk in empty air.
     k.area({ shape: new k.Rect(k.vec2(0), w, CAP_H) }),
     k.body({ isStatic: true }),
+    k.color(90, 160, 70),
+    k.outline(2, k.rgb(60, 110, 50)),
     "platform",
   ]);
-  for (let i = 0; i < tilesWide; i++) {
-    let part;
-    if (i === 0) part = "Left";
-    else if (i === tilesWide - 1) part = "Right";
-    else part = i % 2 ? "MidAlt" : "Mid"; // alternate mids for texture
-    platform.add([k.pos(i * TILE, 0), k.sprite(prefix + part)]);
-  }
-  return platform;
 }
-
-// Ground spans the bottom; floating platforms climb up in different colours.
-const groundY = k.height() - TILE;
-makePlatform(0, groundY, Math.ceil(k.width() / TILE) + 1, "brown");
-makePlatform(180, groundY - 130, 3, "tan");
-makePlatform(470, groundY - 250, 3, "red");
-makePlatform(150, groundY - 370, 2, "tan");
 
 // --- Controls ---
 let facing = 1; // last horizontal direction, used for flip + default dash aim
