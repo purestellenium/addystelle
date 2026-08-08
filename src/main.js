@@ -7,6 +7,13 @@ const k = kaplay({
 
 k.loadRoot("./"); // A good idea for Itch.io publishing later
 
+k.loadSprite("bgShroom", "platformerGraphics_mushroomLand/Backgrounds/bg_shroom.png");
+k.add([
+  k.sprite("bgShroom", { width: k.width(), height: k.height() }),
+  k.pos(0, 0),
+  k.z(-999),
+]);
+
 // Twiggy: a 12x6 grid of 32x32 frames. KAPLAY slices it natively — no need
 // to split the sheet into separate files. Filled frames by index:
 //   row 2: 25-34  (front idle / emotes)
@@ -25,13 +32,27 @@ k.loadSprite("twiggy", "sprites/Twiggy_spritesheet.png", {
   },
 });
 
+// Mushroom-cap platform tiles: each piece is a 70x70 canvas but the drawn
+// cap only fills the top 40px (rows 40-69 are transparent padding), so
+// Left/Mid/Right tile edge-to-edge to build a cap of any width.
+const MUSHROOM_TILE = 70;
+const MUSHROOM_CAP_H = 40;
+const MUSHROOM_COLORS = ["shroomBrown", "shroomRed", "shroomTan", "shroomBrownSpots"];
+for (const color of MUSHROOM_COLORS) {
+  for (const part of ["Left", "Mid", "Right"]) {
+    k.loadSprite(
+      `${color}${part}`,
+      `platformerGraphics_mushroomLand/PNG/${color}${part}.png`,
+    );
+  }
+}
+
 // --- Tuning ---
 const MOVE_SPEED = 240; // horizontal speed (px/s)
 const JUMP_FORCE = 640; // initial jump velocity
-const FLOOR_HEIGHT = 48;
 
 // Feel tuning
-const COYOTE_TIME = 0.1; // grace period to still jump after leaving a ledge (s)
+const COYOTE_TIME = 0.01; // grace period to still jump after leaving a ledge (s)
 const JUMP_BUFFER = 0.1; // press jump this early before landing and it still fires (s)
 const JUMP_CUT = 0.4; // release jump early -> keep this fraction of upward velocity
 
@@ -70,25 +91,45 @@ function setAnim(name) {
 }
 
 // --- Platforms ---
-// [x, y, width, height]
-const platforms = [
-  [0, k.height() - FLOOR_HEIGHT, k.width(), FLOOR_HEIGHT], // ground
-  [180, k.height() - 160, 160, 24],
-  [420, k.height() - 260, 160, 24],
-  [120, k.height() - 360, 160, 24],
-];
+// A continuous ground strip (Mid tiles only, edge-to-edge) plus a few
+// floating mushroom caps (Left + Mid...Mid + Right) in different colors.
+function addGroundStrip(x, y, tileCount, color) {
+  for (let i = 0; i < tileCount; i++) {
+    k.add([k.sprite(`${color}Mid`), k.pos(x + i * MUSHROOM_TILE, y), "platform"]);
+  }
+  addPlatformBody(x, y, tileCount * MUSHROOM_TILE);
+}
 
-for (const [x, y, w, h] of platforms) {
+function addMushroomCap(x, y, tileCount, color) {
+  k.add([k.sprite(`${color}Left`), k.pos(x, y), "platform"]);
+  for (let i = 1; i < tileCount - 1; i++) {
+    k.add([k.sprite(`${color}Mid`), k.pos(x + i * MUSHROOM_TILE, y), "platform"]);
+  }
   k.add([
-    k.rect(w, h),
+    k.sprite(`${color}Right`),
+    k.pos(x + (tileCount - 1) * MUSHROOM_TILE, y),
+    "platform",
+  ]);
+  addPlatformBody(x, y, tileCount * MUSHROOM_TILE);
+}
+
+// Invisible collider matching the cap's visible (non-transparent) band.
+function addPlatformBody(x, y, width) {
+  k.add([
+    k.rect(width, MUSHROOM_CAP_H),
     k.pos(x, y),
     k.area(),
     k.body({ isStatic: true }),
-    k.color(90, 160, 70),
-    k.outline(2, k.rgb(60, 110, 50)),
+    k.opacity(0),
     "platform",
   ]);
 }
+
+const groundY = k.height() - MUSHROOM_CAP_H;
+addGroundStrip(0, groundY, Math.ceil(k.width() / MUSHROOM_TILE), "shroomBrown");
+addMushroomCap(180, k.height() - 160, 3, "shroomRed");
+addMushroomCap(420, k.height() - 260, 3, "shroomTan");
+addMushroomCap(120, k.height() - 360, 3, "shroomBrownSpots");
 
 // --- Controls ---
 let facing = 1; // last horizontal direction, used for flip + default dash aim
