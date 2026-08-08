@@ -58,10 +58,9 @@ for (const color of MUSHROOM_COLORS) {
 // --- Tuning ---
 const MOVE_SPEED = 240; // horizontal speed (px/s)
 const JUMP_FORCE = 640; // initial jump velocity
-const FLOOR_HEIGHT = 48;
 
 // Feel tuning
-const COYOTE_TIME = 0.01; // grace period to still jump after leaving a ledge (s)
+const COYOTE_TIME = 0.1; // grace period to still jump after leaving a ledge (s)
 const JUMP_BUFFER = 0.1; // press jump this early before landing and it still fires (s)
 const JUMP_CUT = 0.4; // release jump early -> keep this fraction of upward velocity
 
@@ -100,27 +99,31 @@ function setAnim(name) {
 }
 
 // --- Platforms ---
-// [x, y, width, height]
-const platforms = [
-  [0, k.height() - FLOOR_HEIGHT, k.width(), FLOOR_HEIGHT], // ground
-  [180, k.height() - 160, 160, 24],
-  [420, k.height() - 260, 160, 24],
-  [120, k.height() - 360, 160, 24],
-];
-
-for (const [x, y, w, h] of platforms) {
-  k.add([
-    k.rect(w, h),
+// One invisible static collider (sized to the visible cap, not the full tile)
+// with Left/Mid/Right mushroom tiles laid on top as children.
+function makePlatform(x, y, tilesWide, color = "shroomBrown") {
+  const w = tilesWide * MUSHROOM_TILE;
+  const platform = k.add([
     k.pos(x, y),
-    // Collider matches the visible cap (top ~40px); the tile's lower 30px is
+    // Collider matches the drawn cap (top ~40px); the tile's lower 30px is
     // transparent, so a full-tile collider would block/bonk in empty air.
-    k.area({ shape: new k.Rect(k.vec2(0), w, CAP_H) }),
+    k.area({ shape: new k.Rect(k.vec2(0), w, MUSHROOM_CAP_H) }),
     k.body({ isStatic: true }),
-    k.color(90, 160, 70),
-    k.outline(2, k.rgb(60, 110, 50)),
     "platform",
   ]);
+  for (let i = 0; i < tilesWide; i++) {
+    const part = i === 0 ? "Left" : i === tilesWide - 1 ? "Right" : "Mid";
+    platform.add([k.pos(i * MUSHROOM_TILE, 0), k.sprite(color + part)]);
+  }
+  return platform;
 }
+
+// Ground spans the bottom; floating platforms climb up in different colours.
+const groundY = k.height() - MUSHROOM_TILE;
+makePlatform(0, groundY, Math.ceil(k.width() / MUSHROOM_TILE) + 1, "shroomBrown");
+makePlatform(180, groundY - 130, 3, "shroomTan");
+makePlatform(470, groundY - 250, 3, "shroomRed");
+makePlatform(150, groundY - 370, 2, "shroomBrownSpots");
 
 // --- Controls ---
 let facing = 1; // last horizontal direction, used for flip + default dash aim
