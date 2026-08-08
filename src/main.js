@@ -136,17 +136,15 @@ makePlatform(0, groundY, groundMids);
 //
 // Reach limits below aren't guesses — they came from simulating the actual
 // jump/dash physics (gravity 1600, JUMP_FORCE 640, dash speed/duration/vertical
-// scale) frame-by-frame. Two things fell out of that:
-//   1. A plain jump rises at most ~127px (JUMP_FORCE^2 / (2*gravity)) — and
-//      dashing does NOT add height: the "no straight-up dash" rule plus the
-//      0.5x vertical scale means the best dash is nearly horizontal and
-//      timed at the jump's apex, so it can't push higher than a plain jump.
-//      MAX_GAP must stay under that ~127px ceiling, full stop.
-//   2. Dash instead buys extra *horizontal* reach at a given height (e.g. at
-//      a 115px rise, a plain jump reaches ~125px sideways; an optimally-aimed
-//      dash stretches that to ~230px). MAX_REACH is kept inside the plain-jump
-//      figure so every step is clearable without requiring dash mastery —
-//      dash is a bonus, not a requirement.
+// scale) frame-by-frame:
+//   1. A plain jump rises at most ~127px (JUMP_FORCE^2 / (2*gravity)).
+//      MAX_GAP stays under that so every gap is clearable without dashing.
+//      (An apex-timed diagonal dash *can* stretch that further — the freeze
+//      phase hangs you at the apex instead of falling, then the burst adds
+//      real upward velocity — but nothing here requires that.)
+//   2. Dash also buys extra *horizontal* reach at a given height (e.g. at a
+//      115px rise, a plain jump reaches ~125px sideways). MAX_REACH is kept
+//      inside that plain-jump figure — dash is a bonus, not a requirement.
 const MIN_MID = 3;
 const MAX_MID = 8;
 const MIN_GAP = 60; // vertical gap floor (px)
@@ -155,25 +153,38 @@ const MAX_REACH = 110; // max horizontal step (px) — safe even at MAX_GAP on a
 const GEN_LOOKAHEAD = 500; // keep generating this far above the player (world px)
 const CLEANUP_BELOW = 900; // destroy floating platforms this far below the player
 
+// Bound the wander walk against the WIDEST possible platform's edge, not
+// each platform's own (randomly narrower or wider) edge. If the x-clamp used
+// the current platform's actual width instead, a wide platform rolled right
+// after the walk had drifted near a narrow platform's looser boundary could
+// force a final position more than MAX_REACH away from the previous one —
+// silently producing an unreachable jump. Using a fixed worst-case bound
+// means the reach clamp is always the tighter (and only relevant) one.
+const MAX_WIDTH_WORLD = (EDGE_W * 2 + MID_W * MAX_MID) * PLATFORM_SCALE;
+const WANDER_MAX_X = Math.max(20, k.width() - MAX_WIDTH_WORLD - 20);
+
 let highestY = groundY;
-let prevX = 180;
+// Clamped in case the viewport is narrow enough that 180 or the midpoint
+// would already fall outside [20, WANDER_MAX_X] — keeps the "both bounds
+// always agree" invariant true from the very first spawn, not just once the
+// wander loop has run once.
+let prevX = Math.max(20, Math.min(180, WANDER_MAX_X));
 // A point the path is currently walking toward; once reached, a fresh one is
 // picked anywhere across the width. This is what makes the climb actually
 // swing out to both edges of the screen over time, rather than just taking
 // small steps that (even randomly directed) tend to hover near the middle.
-let wanderTargetX = k.width() / 2;
+let wanderTargetX = Math.max(20, Math.min(k.width() / 2, WANDER_MAX_X));
 
 function spawnNextPlatform() {
   const midCount = MIN_MID + Math.floor(Math.random() * (MAX_MID - MIN_MID + 1));
   const widthWorld = (EDGE_W * 2 + MID_W * midCount) * PLATFORM_SCALE;
-  const maxX = Math.max(20, k.width() - widthWorld - 20);
   highestY -= MIN_GAP + Math.random() * (MAX_GAP - MIN_GAP);
 
   if (Math.abs(wanderTargetX - prevX) < 1) {
-    wanderTargetX = 20 + Math.random() * (maxX - 20);
+    wanderTargetX = 20 + Math.random() * (WANDER_MAX_X - 20);
   }
   const step = Math.max(-MAX_REACH, Math.min(MAX_REACH, wanderTargetX - prevX));
-  const x = Math.min(maxX, Math.max(20, prevX + step));
+  const x = Math.min(WANDER_MAX_X, Math.max(20, prevX + step));
 
   makeFloatingPlatform(x, highestY, midCount);
   prevX = x;
@@ -319,3 +330,76 @@ k.add([
   k.color(40, 40, 40),
   k.fixed(),
 ]);
+
+// --- AITA ticker ---
+// Reddit's JSON API 403s unauthenticated cross-origin requests outright and
+// sends no Access-Control-Allow-Origin header, so a plain fetch() from the
+// browser can never read the response — this goes through a public CORS
+// proxy instead. That proxy is a soft dependency: Reddit's bot-blocking has
+// been seen to catch proxy traffic too, and free proxies go down on their
+// own. Either failure just leaves FALLBACK_TITLES showing — never an error,
+// never a broken ticker, just a quiet fallback.
+const REDDIT_PROXY = "https://api.allorigins.win/raw?url=";
+const REDDIT_URL =
+  "https://www.reddit.com/r/AmItheAsshole/top.json?limit=15&t=day";
+const FALLBACK_TITLES = [
+  "(couldn't reach r/AmItheAsshole — showing placeholders)",
+  "AITA for eating the last slice of pizza I'd labeled with my name?",
+  "AITA for telling my roommate the plant is fake and always has been?",
+  "AITA for refusing to swap seats on a 3 hour flight?",
+  "AITA for skipping my cousin's fourth wedding this year?",
+];
+
+const TICKER_WIDTH = 260;
+const TICKER_SPEED = 30; // px/s, scrolling upward
+const TICKER_ROW_H = 100; // fixed slot height per title (generous for wrapped text)
+
+k.add([
+  k.rect(TICKER_WIDTH, k.height()),
+  k.pos(k.width() - TICKER_WIDTH, 0),
+  k.color(20, 20, 30),
+  k.opacity(0.55),
+  k.fixed(),
+  k.z(50),
+]);
+
+const ticker = k.add([
+  k.pos(k.width() - TICKER_WIDTH + 12, k.height()),
+  k.fixed(),
+  k.z(51),
+]);
+let tickerLoopHeight = 0;
+
+function setTickerTitles(titles) {
+  ticker.removeAll();
+  // Render the list twice back-to-back so wrapping from the bottom of the
+  // second copy back to the top of the first reads as a seamless loop.
+  for (const title of [...titles, ...titles]) {
+    ticker.add([
+      k.text(title, { size: 14, width: TICKER_WIDTH - 24 }),
+      k.pos(0, ticker.children.length * TICKER_ROW_H),
+      k.color(255, 255, 255),
+    ]);
+  }
+  tickerLoopHeight = titles.length * TICKER_ROW_H;
+  ticker.pos.y = k.height();
+}
+
+setTickerTitles(FALLBACK_TITLES);
+
+ticker.onUpdate(() => {
+  ticker.pos.y -= TICKER_SPEED * k.dt();
+  if (ticker.pos.y <= k.height() - tickerLoopHeight) {
+    ticker.pos.y += tickerLoopHeight;
+  }
+});
+
+fetch(REDDIT_PROXY + encodeURIComponent(REDDIT_URL))
+  .then((res) => res.json())
+  .then((json) => {
+    const titles = (json?.data?.children ?? [])
+      .map((post) => post?.data?.title)
+      .filter(Boolean);
+    if (titles.length > 0) setTickerTitles(titles);
+  })
+  .catch(() => {}); // Reddit/proxy unreachable — FALLBACK_TITLES stays up.
