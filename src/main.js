@@ -114,8 +114,12 @@ function makePlatform(x, y, midCount) {
 
 // Same as makePlatform, but hangs pedestal legs under the end tiles so it
 // reads as a floating island instead of a slab that just stops mid-air.
+// Tagged "floating" (on top of "platform") so the endless generator below
+// can clean up ones the player has long since climbed past, without
+// touching the ground.
 function makeFloatingPlatform(x, y, midCount) {
-  const { platform, width } = makePlatform(x, y, midCount);
+  const { platform } = makePlatform(x, y, midCount);
+  platform.use("floating");
   return platform;
 }
 
@@ -126,9 +130,66 @@ const groundY = k.height() - TILE_H * PLATFORM_SCALE;
 const groundMids =
   Math.ceil((k.width() / PLATFORM_SCALE - EDGE_W * 2) / MID_W) + 1;
 makePlatform(0, groundY, groundMids);
-makeFloatingPlatform(180, groundY - 120, 6);
-makeFloatingPlatform(520, groundY - 260, 6);
-makeFloatingPlatform(180, groundY - 390, 4);
+
+// Endless generation: keep spawning platforms above the highest one so far,
+// as the player climbs.
+//
+// Reach limits below aren't guesses — they came from simulating the actual
+// jump/dash physics (gravity 1600, JUMP_FORCE 640, dash speed/duration/vertical
+// scale) frame-by-frame. Two things fell out of that:
+//   1. A plain jump rises at most ~127px (JUMP_FORCE^2 / (2*gravity)) — and
+//      dashing does NOT add height: the "no straight-up dash" rule plus the
+//      0.5x vertical scale means the best dash is nearly horizontal and
+//      timed at the jump's apex, so it can't push higher than a plain jump.
+//      MAX_GAP must stay under that ~127px ceiling, full stop.
+//   2. Dash instead buys extra *horizontal* reach at a given height (e.g. at
+//      a 115px rise, a plain jump reaches ~125px sideways; an optimally-aimed
+//      dash stretches that to ~230px). MAX_REACH is kept inside the plain-jump
+//      figure so every step is clearable without requiring dash mastery —
+//      dash is a bonus, not a requirement.
+const MIN_MID = 3;
+const MAX_MID = 8;
+const MIN_GAP = 60; // vertical gap floor (px)
+const MAX_GAP = 115; // vertical gap ceiling — comfortably under the ~127px jump cap
+const MAX_REACH = 110; // max horizontal step (px) — safe even at MAX_GAP on a plain jump
+const GEN_LOOKAHEAD = 500; // keep generating this far above the player (world px)
+const CLEANUP_BELOW = 900; // destroy floating platforms this far below the player
+
+let highestY = groundY;
+let prevX = 180;
+// A point the path is currently walking toward; once reached, a fresh one is
+// picked anywhere across the width. This is what makes the climb actually
+// swing out to both edges of the screen over time, rather than just taking
+// small steps that (even randomly directed) tend to hover near the middle.
+let wanderTargetX = k.width() / 2;
+
+function spawnNextPlatform() {
+  const midCount = MIN_MID + Math.floor(Math.random() * (MAX_MID - MIN_MID + 1));
+  const widthWorld = (EDGE_W * 2 + MID_W * midCount) * PLATFORM_SCALE;
+  const maxX = Math.max(20, k.width() - widthWorld - 20);
+  highestY -= MIN_GAP + Math.random() * (MAX_GAP - MIN_GAP);
+
+  if (Math.abs(wanderTargetX - prevX) < 1) {
+    wanderTargetX = 20 + Math.random() * (maxX - 20);
+  }
+  const step = Math.max(-MAX_REACH, Math.min(MAX_REACH, wanderTargetX - prevX));
+  const x = Math.min(maxX, Math.max(20, prevX + step));
+
+  makeFloatingPlatform(x, highestY, midCount);
+  prevX = x;
+}
+
+// Seed a handful up front so there's already a climb visible on load.
+for (let i = 0; i < 6; i++) spawnNextPlatform();
+
+k.onUpdate(() => {
+  while (highestY > player.pos.y - GEN_LOOKAHEAD) {
+    spawnNextPlatform();
+  }
+  for (const p of k.get("floating")) {
+    if (p.pos.y > player.pos.y + CLEANUP_BELOW) p.destroy();
+  }
+});
 
 // --- Controls ---
 let facing = 1; // last horizontal direction, used for flip + default dash aim
