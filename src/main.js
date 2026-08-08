@@ -241,6 +241,17 @@ player.onUpdate(() => {
   }
 });
 
+// --- Camera ---
+// Vertical-only follow: horizontal stays centered, and the camera holds at
+// its default height (ground visible at the bottom) until the player climbs
+// above the midline, at which point it scrolls up to keep them in view.
+k.camPos(k.width() / 2, k.height() / 2);
+player.onUpdate(() => {
+  const targetY = Math.min(k.height() / 2, player.pos.y);
+  const cam = k.camPos();
+  k.camPos(cam.x, k.lerp(cam.y, targetY, 0.1));
+});
+
 // --- HUD ---
 k.add([
   k.text("A/D move, W/Space jump, K dash (aim with WASD)", { size: 18 }),
