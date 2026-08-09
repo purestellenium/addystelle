@@ -1,5 +1,6 @@
 import kaplay from "kaplay";
 import "kaplay/global";
+import aitaTitles from "./aita-titles.json";
 
 const k = kaplay({
   background: [135, 206, 235],
@@ -45,7 +46,7 @@ k.setGravity(1600);
 
 const PLATFORM_H = TILE_H * PLATFORM_SCALE;
 const PLAYER_FEET = 32;
-const LAND_MARGIN = 20;
+const MAX_VEL = 1600;
 const groundY = k.height() - TILE_H * PLATFORM_SCALE;
 const SPAWN = k.vec2(120, groundY - PLAYER_FEET);
 
@@ -53,7 +54,7 @@ const player = k.add([
   k.sprite("twiggy", { anim: "idle" }),
   k.pos(SPAWN.x, SPAWN.y),
   k.area({ scale: k.vec2(0.7, 0.85), offset: k.vec2(0, 2.4) }),
-  k.body(),
+  k.body({ maxVelocity: MAX_VEL }),
   k.anchor("center"),
   k.scale(2),
   k.z(10),
@@ -80,10 +81,12 @@ function makePlatform(x, y, midCount) {
   platform.onBeforePhysicsResolve((col) => {
     const p = col.target;
     if (p !== player) return;
-    const feet = p.pos.y + PLAYER_FEET;
-    if (p.vel.y < -20 || feet > platform.pos.y + LAND_MARGIN) {
+    if (p.vel.y < -20) {
       col.preventResolution();
+      return;
     }
+    const prevFeet = p.pos.y + PLAYER_FEET - p.vel.y * k.dt();
+    if (prevFeet > platform.pos.y + 4) col.preventResolution();
   });
   platform.add([k.pos(0, 0), k.sprite("groundLeft"), k.scale(S)]);
   for (let i = 0; i < midCount; i++) {
@@ -115,13 +118,10 @@ const MOVES = [
 const MIN_MID = 3;
 const MAX_MID = 8;
 const GEN_LOOKAHEAD = 500;
-const CLEANUP_BELOW = 900;
-const DEATH_DROP = CLEANUP_BELOW;
 
 let highestY = groundY;
 let prevX = k.width() / 2;
 let prevW = 0;
-let peakY = groundY;
 
 function spawnNextPlatform() {
   const move = MOVES[Math.floor(Math.random() * MOVES.length)];
@@ -165,9 +165,6 @@ regeneratePlatforms();
 k.onUpdate(() => {
   while (highestY > player.pos.y - GEN_LOOKAHEAD) {
     spawnNextPlatform();
-  }
-  for (const p of k.get("floating")) {
-    if (p.pos.y > player.pos.y + CLEANUP_BELOW) p.destroy();
   }
 });
 
@@ -276,19 +273,6 @@ function cutJump() {
 k.onKeyRelease("w", cutJump);
 k.onKeyRelease("space", cutJump);
 
-function resetRun() {
-  regeneratePlatforms();
-  player.pos = k.vec2(SPAWN.x, SPAWN.y);
-  player.vel = k.vec2(0, 0);
-  peakY = player.pos.y;
-  dashReady = true;
-}
-
-player.onUpdate(() => {
-  peakY = Math.min(peakY, player.pos.y);
-  if (player.pos.y > peakY + DEATH_DROP) resetRun();
-});
-
 k.camPos(k.width() / 2, k.height() / 2);
 player.onUpdate(() => {
   const targetY = Math.min(k.height() / 2, player.pos.y);
@@ -304,16 +288,11 @@ k.add([
 ]);
 
 // --- AITA ticker ---
-// Reddit's JSON API 403s unauthenticated cross-origin requests outright and
-// sends no Access-Control-Allow-Origin header, so a plain fetch() from the
-// browser can never read the response — this goes through a public CORS
-// proxy instead. That proxy is a soft dependency: Reddit's bot-blocking has
-// been seen to catch proxy traffic too, and free proxies go down on their
-// own. Either failure just leaves FALLBACK_TITLES showing — never an error,
-// never a broken ticker, just a quiet fallback.
-const REDDIT_PROXY = "https://api.allorigins.win/raw?url=";
-const REDDIT_URL =
-  "https://www.reddit.com/r/AmItheAsshole/top.json?limit=15&t=day";
+// Titles are baked in at build time from src/aita-titles.json — refresh with
+// `npm run titles` (see scripts/fetch-aita.mjs). Reddit blocks cloud IPs and
+// browsers can't fetch it cross-origin, so a live pull isn't possible on static
+// hosting; this snapshot updates whenever you re-run the script and rebuild.
+// FALLBACK_TITLES shows only if the JSON is somehow empty.
 const FALLBACK_TITLES = [
   "(couldn't reach r/AmItheAsshole — showing placeholders)",
   "AITA for eating the last slice of pizza I'd labeled with my name?",
@@ -322,15 +301,15 @@ const FALLBACK_TITLES = [
   "AITA for skipping my cousin's fourth wedding this year?",
 ];
 
-const TICKER_WIDTH = 260;
+const TICKER_WIDTH = 380;
 const TICKER_SPEED = 30; // px/s, scrolling upward
-const TICKER_ROW_H = 100; // fixed slot height per title (generous for wrapped text)
+const TICKER_ROW_H = 140; // fixed slot height per title (generous for wrapped text)
+const TICKER_TEXT_SIZE = 22;
 
 k.add([
   k.rect(TICKER_WIDTH, k.height()),
   k.pos(k.width() - TICKER_WIDTH, 0),
-  k.color(20, 20, 30),
-  k.opacity(0.55),
+  k.color(255, 255, 255),
   k.fixed(),
   k.z(50),
 ]);
@@ -348,16 +327,20 @@ function setTickerTitles(titles) {
   // second copy back to the top of the first reads as a seamless loop.
   for (const title of [...titles, ...titles]) {
     ticker.add([
-      k.text(title, { size: 14, width: TICKER_WIDTH - 24 }),
+      k.text(title, { size: TICKER_TEXT_SIZE, width: TICKER_WIDTH - 24 }),
       k.pos(0, ticker.children.length * TICKER_ROW_H),
-      k.color(255, 255, 255),
+      k.color(0, 0, 0),
     ]);
   }
   tickerLoopHeight = titles.length * TICKER_ROW_H;
   ticker.pos.y = k.height();
 }
 
-setTickerTitles(FALLBACK_TITLES);
+setTickerTitles(
+  Array.isArray(aitaTitles) && aitaTitles.length > 0
+    ? aitaTitles
+    : FALLBACK_TITLES,
+);
 
 ticker.onUpdate(() => {
   ticker.pos.y -= TICKER_SPEED * k.dt();
@@ -365,13 +348,3 @@ ticker.onUpdate(() => {
     ticker.pos.y += tickerLoopHeight;
   }
 });
-
-fetch(REDDIT_PROXY + encodeURIComponent(REDDIT_URL))
-  .then((res) => res.json())
-  .then((json) => {
-    const titles = (json?.data?.children ?? [])
-      .map((post) => post?.data?.title)
-      .filter(Boolean);
-    if (titles.length > 0) setTickerTitles(titles);
-  })
-  .catch(() => {}); // Reddit/proxy unreachable — FALLBACK_TITLES stays up.
