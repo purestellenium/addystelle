@@ -549,10 +549,10 @@ function coinPower() {
 const AURA_BASE = 30;
 const AURA_RANGE = 95;
 const AURA_RX = 16;
-const AURA_RY = 18;
+const AURA_RY = 16;
 const AURA_GROW_RATE = 0.015;
-const AURA_SPIKES = 900;
-const AURA_SPIKE_AMOUNT = 0.85;
+const AURA_SPIKES = 499;
+const AURA_SPIKE_AMOUNT = 0.9;
 const AURA_FRAMES = 8;
 const AURA_TILE = 200;
 
@@ -639,17 +639,21 @@ function spawnGem(x, y) {
   });
 }
 
+// Gem placement stays inside the ticker's solid area: past the left gradient
+// (edge fade) and off the far right edge, with room for the gem's own size
+// (rotated 18px square + outline + scale pulse ≈ 20px half-extent).
+const GEM_HALF = 20;
+const GEM_MIN_X = TICKER_LEFT + TICKER_EDGE_FADE + GEM_HALF;
+const GEM_MAX_X = k.width() - GEM_HALF;
+
 // Put a gem on each platform that reaches behind the ticker, once.
 k.onUpdate(() => {
   for (const p of k.get("floating")) {
     if (p.gemDecided) continue;
     p.gemDecided = true;
     const span = p.spanW || 0;
-    if (p.pos.x + span > TICKER_LEFT + 20 && Math.random() < 0.85) {
-      const gx = Math.min(
-        k.width() - 26,
-        Math.max(TICKER_LEFT + 26, p.pos.x + span / 2),
-      );
+    if (p.pos.x + span > GEM_MIN_X && Math.random() < 0.85) {
+      const gx = Math.min(GEM_MAX_X, Math.max(GEM_MIN_X, p.pos.x + span / 2));
       spawnGem(gx, p.pos.y - 30);
     }
   }
