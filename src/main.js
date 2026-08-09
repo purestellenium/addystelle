@@ -287,24 +287,34 @@ k.add([
   k.fixed(),
 ]);
 
-// --- AITA ticker ---
-// Titles are baked in at build time from src/aita-titles.json — refresh with
-// `npm run titles` (see scripts/fetch-aita.mjs). Reddit blocks cloud IPs and
-// browsers can't fetch it cross-origin, so a live pull isn't possible on static
-// hosting; this snapshot updates whenever you re-run the script and rebuild.
-// FALLBACK_TITLES shows only if the JSON is somehow empty.
-const FALLBACK_TITLES = [
-  "(couldn't reach r/AmItheAsshole — showing placeholders)",
-  "AITA for eating the last slice of pizza I'd labeled with my name?",
-  "AITA for telling my roommate the plant is fake and always has been?",
-  "AITA for refusing to swap seats on a 3 hour flight?",
-  "AITA for skipping my cousin's fourth wedding this year?",
+const FALLBACK_STORIES = [
+  {
+    title: "(couldn't reach r/AmItheAsshole — showing placeholders)",
+    text: "",
+  },
+  {
+    title:
+      "AITA for eating the last slice of pizza I'd labeled with my name?",
+    text: "",
+  },
+  {
+    title:
+      "AITA for telling my roommate the plant is fake and always has been?",
+    text: "",
+  },
+  { title: "AITA for refusing to swap seats on a 3 hour flight?", text: "" },
+  { title: "AITA for skipping my cousin's fourth wedding this year?", text: "" },
 ];
 
-const TICKER_WIDTH = 380;
-const TICKER_SPEED = 30; // px/s, scrolling upward
-const TICKER_ROW_H = 140; // fixed slot height per title (generous for wrapped text)
-const TICKER_TEXT_SIZE = 22;
+const TICKER_WIDTH_RATIO = 0.3;
+const TICKER_WIDTH = Math.round(k.width() * TICKER_WIDTH_RATIO);
+const TICKER_SPEED = 30;
+const TICKER_TITLE_SIZE = 30;
+const TICKER_BODY_SIZE = 20;
+const TICKER_TITLE_BODY_GAP = 8;
+const TICKER_STORY_GAP = 32;
+const TICKER_PADDING_RATIO = 0.012;
+const TICKER_PADDING = Math.round(k.width() * TICKER_PADDING_RATIO);
 
 k.add([
   k.rect(TICKER_WIDTH, k.height()),
@@ -314,37 +324,122 @@ k.add([
   k.z(50),
 ]);
 
+function renderStoryBitmap(story) {
+  const innerWidth = TICKER_WIDTH - TICKER_PADDING * 2;
+  const titleFont = `bold ${TICKER_TITLE_SIZE}px monospace`;
+  const bodyFont = `${TICKER_BODY_SIZE}px monospace`;
+  const titleLineH = Math.round(TICKER_TITLE_SIZE * 1.3);
+  const bodyLineH = Math.round(TICKER_BODY_SIZE * 1.4);
+
+  const measurer = document.createElement("canvas").getContext("2d");
+
+  function wrap(text, font) {
+    measurer.font = font;
+    const lines = [];
+    for (const paragraph of text.split("\n")) {
+      if (paragraph === "") {
+        lines.push("");
+        continue;
+      }
+      let line = "";
+      for (const word of paragraph.split(" ")) {
+        const attempt = line ? `${line} ${word}` : word;
+        if (line && measurer.measureText(attempt).width > innerWidth) {
+          lines.push(line);
+          line = word;
+        } else {
+          line = attempt;
+        }
+      }
+      lines.push(line);
+    }
+    return lines;
+  }
+
+  const ops = [];
+  let y = 0;
+  for (const line of wrap(story.title, titleFont)) {
+    y += titleLineH;
+    ops.push({ text: line, y, font: titleFont, color: "#000" });
+  }
+  if (story.text) {
+    y += TICKER_TITLE_BODY_GAP;
+    for (const line of wrap(story.text, bodyFont)) {
+      y += bodyLineH;
+      ops.push({ text: line, y, font: bodyFont, color: "#464646" });
+    }
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = TICKER_WIDTH;
+  canvas.height = Math.ceil(y);
+  const ctx = canvas.getContext("2d");
+  for (const op of ops) {
+    ctx.font = op.font;
+    ctx.fillStyle = op.color;
+    ctx.fillText(op.text, TICKER_PADDING, op.y);
+  }
+
+  return { dataUrl: canvas.toDataURL(), height: canvas.height };
+}
+
+const stories =
+  Array.isArray(aitaTitles) && aitaTitles.length > 0
+    ? aitaTitles
+    : FALLBACK_STORIES;
+const storyBitmaps = stories.map((story, i) => {
+  const { dataUrl, height } = renderStoryBitmap(story);
+  const name = `tickerStory${i}`;
+  k.loadSprite(name, dataUrl);
+  return { name, height };
+});
+
 const ticker = k.add([
-  k.pos(k.width() - TICKER_WIDTH + 12, k.height()),
+  k.pos(k.width() - TICKER_WIDTH, k.height()),
   k.fixed(),
   k.z(51),
 ]);
-let tickerLoopHeight = 0;
 
-function setTickerTitles(titles) {
-  ticker.removeAll();
-  // Render the list twice back-to-back so wrapping from the bottom of the
-  // second copy back to the top of the first reads as a seamless loop.
-  for (const title of [...titles, ...titles]) {
-    ticker.add([
-      k.text(title, { size: TICKER_TEXT_SIZE, width: TICKER_WIDTH - 24 }),
-      k.pos(0, ticker.children.length * TICKER_ROW_H),
-      k.color(0, 0, 0),
-    ]);
+const items = [];
+{
+  let y = 0;
+  for (const bitmap of [...storyBitmaps, ...storyBitmaps]) {
+    items.push({ name: bitmap.name, height: bitmap.height, y });
+    y += bitmap.height + TICKER_STORY_GAP;
   }
-  tickerLoopHeight = titles.length * TICKER_ROW_H;
-  ticker.pos.y = k.height();
 }
+const tickerLoopHeight = items.length
+  ? items[items.length / 2].y
+  : 0;
 
-setTickerTitles(
-  Array.isArray(aitaTitles) && aitaTitles.length > 0
-    ? aitaTitles
-    : FALLBACK_TITLES,
-);
+const TICKER_WINDOW_BUFFER = 200;
+const activeItems = new Map();
+
+function syncTickerWindow() {
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const top = ticker.pos.y + item.y;
+    const bottom = top + item.height;
+    const visible =
+      bottom >= -TICKER_WINDOW_BUFFER &&
+      top <= k.height() + TICKER_WINDOW_BUFFER;
+    if (visible && !activeItems.has(i)) {
+      activeItems.set(
+        i,
+        ticker.add([k.sprite(item.name), k.pos(0, item.y)]),
+      );
+    } else if (!visible && activeItems.has(i)) {
+      activeItems.get(i).destroy();
+      activeItems.delete(i);
+    }
+  }
+}
+syncTickerWindow();
 
 ticker.onUpdate(() => {
   ticker.pos.y -= TICKER_SPEED * k.dt();
   if (ticker.pos.y <= k.height() - tickerLoopHeight) {
     ticker.pos.y += tickerLoopHeight;
   }
+  syncTickerWindow();
 });
