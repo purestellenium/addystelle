@@ -253,6 +253,7 @@ let dashReady = true;
 let freezeTimer = 0;
 let dashTimer = 0;
 let dashCooldown = 0;
+let started = false;
 
 function spawnDashGhost() {
   const ghost = k.add([
@@ -269,6 +270,7 @@ function spawnDashGhost() {
 }
 
 player.onUpdate(() => {
+  if (!started) return;
   const dir = (k.isKeyDown("d") ? 1 : 0) - (k.isKeyDown("a") ? 1 : 0);
   if (dir !== 0) facing = dir;
 
@@ -306,6 +308,7 @@ player.onUpdate(() => {
 });
 
 k.onKeyPress("k", () => {
+  if (!started) return;
   if (!dashReady || player.isGrounded()) return;
   if (dashCooldown > 0 || freezeTimer > 0 || dashTimer > 0) return;
 
@@ -352,6 +355,7 @@ k.onKeyPress("w", requestJump);
 k.onKeyPress("space", requestJump);
 
 function requestJump() {
+  if (!started) return;
   bufferTimer = JUMP_BUFFER;
 }
 
@@ -370,13 +374,6 @@ player.onUpdate(() => {
   const cam = k.getCamPos();
   k.setCamPos(cam.x, k.lerp(cam.y, targetY, 0.1));
 });
-
-k.add([
-  k.text("A/D move, W/Space jump, K dash (aim with WASD)", { size: 18 }),
-  k.pos(12, 12),
-  k.color(40, 40, 40),
-  k.fixed(),
-]);
 
 const FALLBACK_STORIES = [
   {
@@ -758,4 +755,51 @@ player.onCollide("gem", (gem) => {
       k.lifespan(0.35, { fade: 0.35 }),
     ]);
   }
+});
+
+const startEls = [];
+startEls.push(
+  k.add([
+    k.rect(k.width(), k.height()),
+    k.pos(0, 0),
+    k.color(18, 18, 28),
+    k.opacity(0.92),
+    k.fixed(),
+    k.z(200),
+  ]),
+);
+startEls.push(
+  k.add([
+    k.text("WASD to move & jump", { size: 34 }),
+    k.pos(k.width() / 2, k.height() / 2 - 46),
+    k.anchor("center"),
+    k.color(255, 255, 255),
+    k.fixed(),
+    k.z(201),
+  ]),
+);
+startEls.push(
+  k.add([
+    k.text("K to dash", { size: 34 }),
+    k.pos(k.width() / 2, k.height() / 2 + 4),
+    k.anchor("center"),
+    k.color(255, 255, 255),
+    k.fixed(),
+    k.z(201),
+  ]),
+);
+startEls.push(
+  k.add([
+    k.text("press any key to start", { size: 20 }),
+    k.pos(k.width() / 2, k.height() / 2 + 66),
+    k.anchor("center"),
+    k.color(190, 190, 205),
+    k.fixed(),
+    k.z(201),
+  ]),
+);
+k.onKeyPress(() => {
+  if (started) return;
+  started = true;
+  for (const el of startEls) el.destroy();
 });
