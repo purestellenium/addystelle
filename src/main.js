@@ -275,11 +275,11 @@ function cutJump() {
 k.onKeyRelease("w", cutJump);
 k.onKeyRelease("space", cutJump);
 
-k.camPos(k.width() / 2, k.height() / 2);
+k.setCamPos(k.width() / 2, k.height() / 2);
 player.onUpdate(() => {
   const targetY = Math.min(k.height() / 2, player.pos.y);
-  const cam = k.camPos();
-  k.camPos(cam.x, k.lerp(cam.y, targetY, 0.1));
+  const cam = k.getCamPos();
+  k.setCamPos(cam.x, k.lerp(cam.y, targetY, 0.1));
 });
 
 k.add([
