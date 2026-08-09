@@ -30,6 +30,10 @@ k.loadSprite("groundMid", "sprites/groundMid.png");
 k.loadSprite("groundRight", "sprites/groundRight.png");
 
 const MOVE_SPEED = 240;
+const SPEED_GAIN = 250; // full bonus run speed, reached at the coin cap
+const SPEED_CAP_COINS = 20; // coins past this add nothing
+const SPEED_CURVE_K = 0.5; // curve shape: bigger gains at the start & end, small mid
+let moveSpeed = MOVE_SPEED; // grows as coins are collected
 const JUMP_FORCE = 640;
 
 const COYOTE_TIME = 0.1;
@@ -43,6 +47,7 @@ const DASH_COOLDOWN = 0.45;
 const DASH_VERTICAL_SCALE = 0.5;
 const DASH_UPWARD_HORIZONTAL_SCALE = 0.4;
 const DASH_HORIZONTAL_SCALE = 1.9;
+const DASH_H_GAIN = 0.4; // coins boost horizontal dash reach (speed+scale), up to +40%
 
 k.setGravity(1600);
 
@@ -56,7 +61,7 @@ const player = k.add([
   k.sprite("twiggy", { anim: "idle" }),
   k.pos(SPAWN.x, SPAWN.y),
   k.area({ scale: k.vec2(0.7, 0.85), offset: k.vec2(0, 2.4) }),
-  k.body({ maxVelocity: MAX_VEL }),
+  k.body(),
   k.anchor("center"),
   k.scale(2),
   k.z(10),
@@ -78,6 +83,7 @@ function makePlatform(x, y, midCount) {
     k.pos(x, y),
     k.area({ shape: new k.Rect(k.vec2(0), w, TILE_H * S) }),
     k.body({ isStatic: true }),
+    { spanW: w },
     "platform",
   ]);
   platform.onBeforePhysicsResolve((col) => {
@@ -119,7 +125,7 @@ const MOVES = [
 ];
 const MIN_MID = 3;
 const MAX_MID = 8;
-const GEN_LOOKAHEAD = 500;
+const GEN_LOOKAHEAD = k.height() + 300; // always fill past the top of the view
 
 let highestY = groundY;
 let prevX = k.width() / 2;
@@ -159,7 +165,7 @@ function regeneratePlatforms() {
   highestY = groundY;
   prevX = k.width() / 2;
   prevW = 0;
-  for (let i = 0; i < 6; i++) spawnNextPlatform();
+  while (highestY > player.pos.y - GEN_LOOKAHEAD) spawnNextPlatform();
 }
 
 regeneratePlatforms();
@@ -171,7 +177,7 @@ k.onUpdate(() => {
 });
 
 let facing = 1;
-let dashDir = k.vec2(1, 0);
+let dashVel = k.vec2(0, 0);
 let dashReady = true;
 let freezeTimer = 0;
 let dashTimer = 0;
@@ -204,11 +210,12 @@ player.onUpdate(() => {
   } else if (dashTimer > 0) {
     dashTimer -= k.dt();
     player.gravityScale = 0;
-    player.vel = dashDir.scale(DASH_SPEED);
+    player.vel = k.vec2(dashVel.x, dashVel.y);
     spawnDashGhost();
   } else {
     player.gravityScale = 1;
-    player.vel.x = dir * MOVE_SPEED;
+    player.vel.x = dir * moveSpeed;
+    if (player.vel.y > MAX_VEL) player.vel.y = MAX_VEL;
     if (player.isGrounded()) dashReady = true;
   }
 
@@ -239,8 +246,13 @@ k.onKeyPress("k", () => {
   let hScale = 1;
   if (aim.y < 0) hScale = DASH_UPWARD_HORIZONTAL_SCALE;
   else if (aim.y === 0) hScale = DASH_HORIZONTAL_SCALE;
-  dashDir = k.vec2(aim.x * hScale, aim.y * DASH_VERTICAL_SCALE);
-  if (dashDir.x !== 0) facing = dashDir.x > 0 ? 1 : -1;
+  // Coins boost the horizontal dash (speed + scale) only; vertical is untouched.
+  const hBoost = 1 + DASH_H_GAIN * coinPower();
+  dashVel = k.vec2(
+    aim.x * hScale * DASH_SPEED * hBoost,
+    aim.y * DASH_VERTICAL_SCALE * DASH_SPEED,
+  );
+  if (dashVel.x !== 0) facing = dashVel.x > 0 ? 1 : -1;
 
   dashReady = false;
   freezeTimer = DASH_FREEZE;
@@ -289,9 +301,7 @@ player.onUpdate(() => {
 });
 
 k.add([
-  k.text("A/D move, W/Space jump, K dash (aim with WASD), M mute", {
-    size: 18,
-  }),
+  k.text("A/D move, W/Space jump, K dash (aim with WASD)", { size: 18 }),
   k.pos(12, 12),
   k.color(40, 40, 40),
   k.fixed(),
@@ -328,12 +338,9 @@ const TICKER_STORY_GAP = 32;
 const TICKER_PADDING_RATIO = 0.012;
 const TICKER_PADDING = Math.round(k.width() * TICKER_PADDING_RATIO);
 
-const TTS_GROW = 1.6;
-const TTS_RATE = 0.95;
-const TTS_WORDS_PER_SEC = 3.1;
-const TTS_READ_TOP_RATIO = 0.25;
+const TICKER_FONT_SCALE = 1.3;
 
-const TICKER_REVEAL_RADIUS = 240;
+const TICKER_REVEAL_RADIUS = 180;
 const TICKER_REVEAL_ALPHA = 0.25;
 
 k.loadShader(
@@ -450,10 +457,6 @@ const stories = shuffled(
     ? aitaTitles
     : FALLBACK_STORIES,
 );
-function countWords(story) {
-  return `${story.title} ${story.text}`.trim().split(/\s+/).filter(Boolean)
-    .length;
-}
 
 const ticker = k.add([
   k.pos(k.width() - TICKER_WIDTH, k.height()),
@@ -475,18 +478,13 @@ function buildTicker(fontScale) {
     const { dataUrl, height } = renderStoryBitmap(story, fontScale);
     const name = `story_${bitmapGen}_${i}`;
     k.loadSprite(name, dataUrl);
-    return { name, height, words: countWords(story) };
+    return { name, height };
   });
   const gap = Math.round(TICKER_STORY_GAP * fontScale);
   items = [];
   let y = 0;
   for (const bitmap of [...bitmaps, ...bitmaps]) {
-    items.push({
-      name: bitmap.name,
-      height: bitmap.height,
-      words: bitmap.words,
-      y,
-    });
+    items.push({ name: bitmap.name, height: bitmap.height, y });
     y += bitmap.height + gap;
   }
   tickerLoopHeight = items.length ? items[items.length / 2].y : 0;
@@ -516,61 +514,127 @@ function syncTickerWindow() {
   }
 }
 
-buildTicker(1);
+buildTicker(TICKER_FONT_SCALE);
 syncTickerWindow();
 
-let scrollSpeed = TICKER_SPEED;
-let ttsStarted = false;
-let ttsMuted = false;
-let readIdx = 0;
-const storyCount = stories.length;
-
 ticker.onUpdate(() => {
-  ticker.pos.y -= scrollSpeed * k.dt();
+  ticker.pos.y -= TICKER_SPEED * k.dt();
   if (ticker.pos.y <= k.height() - tickerLoopHeight) {
     ticker.pos.y += tickerLoopHeight;
   }
   syncTickerWindow();
 });
 
-function speakStory(i) {
-  const story = stories[i];
-  const text = story.text ? `${story.title}. ${story.text}` : story.title;
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.rate = TTS_RATE;
-  utterance.onstart = () => {
-    ticker.pos.y = Math.round(k.height() * TTS_READ_TOP_RATIO) - items[i].y;
-    const duration = Math.max(2, items[i].words / TTS_WORDS_PER_SEC);
-    const gap = Math.round(TICKER_STORY_GAP * TTS_GROW);
-    scrollSpeed = (items[i].height + gap) / duration;
-  };
-  utterance.onend = () => {
-    if (ttsMuted) return;
-    readIdx = (i + 1) % storyCount;
-    speakStory(readIdx);
-  };
-  window.speechSynthesis.speak(utterance);
+// --- Behind-the-veil secrets ---
+// The gameplay world is full-width; the ticker just draws over the right third.
+// So there's a whole region hidden behind the drama wall — invisible under the
+// opaque ticker, seen only through the reveal "hole" the shader cuts around the
+// player. We stash glowing gems back there: climbing behind the noise to grab
+// them is the hook.
+const TICKER_LEFT = k.width() - TICKER_WIDTH;
+let secrets = 0;
+
+// Coin power 0..1 vs coins collected: steep at the start & end, shallow through
+// the middle, and flat once past SPEED_CAP_COINS. Drives run speed, dash reach,
+// and the aura so they all share the same curve.
+function coinPower() {
+  const t = Math.min(secrets, SPEED_CAP_COINS) / SPEED_CAP_COINS;
+  return t + (SPEED_CURVE_K / (2 * Math.PI)) * Math.sin(2 * Math.PI * t);
 }
 
-function startReading() {
-  if (ttsStarted) return;
-  ttsStarted = true;
-  buildTicker(TTS_GROW);
-  readIdx = 0;
-  speakStory(0);
-}
-
-k.onKeyPress(() => startReading());
-k.onKeyPress("m", () => {
-  ttsMuted = !ttsMuted;
-  if (ttsMuted) window.speechSynthesis.cancel();
-  else if (ttsStarted) speakStory(readIdx);
+// Coin power is shown as a glowing aura around the player that grows with each
+// coin (sqrt so it keeps growing but doesn't explode). Hidden until you have one.
+const AURA_BASE = 34;
+const AURA_RANGE = 95;
+const aura = k.add([
+  k.circle(AURA_BASE),
+  k.pos(player.pos.clone()),
+  k.anchor("center"),
+  k.color(255, 214, 96),
+  k.opacity(0.3),
+  k.z(9),
+]);
+aura.hidden = true;
+aura.onUpdate(() => {
+  aura.pos = player.pos.clone();
+  const r = AURA_BASE + AURA_RANGE * coinPower();
+  aura.radius = r * (1 + Math.sin(k.time() * 5) * 0.06);
 });
 
-k.loop(8, () => {
-  const synth = window.speechSynthesis;
-  if (ttsStarted && !ttsMuted && synth.speaking) {
-    synth.pause();
-    synth.resume();
+function spawnGem(x, y) {
+  const gem = k.add([
+    k.rect(18, 18),
+    k.pos(x, y),
+    k.anchor("center"),
+    k.rotate(45),
+    k.color(255, 214, 74),
+    k.outline(3, k.rgb(255, 255, 255)),
+    k.area(),
+    k.z(8),
+    "gem",
+    { seed: Math.random() * 6.28 },
+  ]);
+  gem.onUpdate(() => {
+    gem.scale = k.vec2(1 + Math.sin(k.time() * 4 + gem.seed) * 0.18);
+  });
+}
+
+// Put a gem on each platform that reaches behind the ticker, once.
+k.onUpdate(() => {
+  for (const p of k.get("floating")) {
+    if (p.gemDecided) continue;
+    p.gemDecided = true;
+    const span = p.spanW || 0;
+    if (p.pos.x + span > TICKER_LEFT + 20 && Math.random() < 0.85) {
+      const gx = Math.min(
+        k.width() - 26,
+        Math.max(TICKER_LEFT + 26, p.pos.x + span / 2),
+      );
+      spawnGem(gx, p.pos.y - 30);
+    }
+  }
+});
+
+player.onCollide("gem", (gem) => {
+  const at = gem.pos.clone();
+  gem.destroy();
+  secrets += 1;
+  moveSpeed = MOVE_SPEED + SPEED_GAIN * coinPower();
+  aura.hidden = false;
+  k.shake(4);
+  for (let i = 0; i < 10; i++) {
+    k.add([
+      k.rect(5, 5),
+      k.pos(at),
+      k.anchor("center"),
+      k.color(255, 232, 130),
+      k.z(11),
+      k.move((i / 10) * 360, 220),
+      k.opacity(1),
+      k.lifespan(0.45, { fade: 0.45 }),
+    ]);
+  }
+  k.add([
+    k.text("+1", { size: 24 }),
+    k.pos(at),
+    k.anchor("center"),
+    k.color(255, 222, 90),
+    k.outline(3, k.rgb(60, 40, 0)),
+    k.z(12),
+    k.move(270, 60),
+    k.opacity(1),
+    k.lifespan(0.7, { fade: 0.7 }),
+  ]);
+  if (secrets % 5 === 0) {
+    k.shake(9);
+    k.add([
+      k.rect(k.width(), k.height()),
+      k.pos(0, 0),
+      k.color(255, 240, 180),
+      k.opacity(0.45),
+      k.fixed(),
+      k.z(59),
+      k.lifespan(0.35, { fade: 0.35 }),
+    ]);
   }
 });
