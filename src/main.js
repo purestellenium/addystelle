@@ -41,6 +41,7 @@ const DASH_SPEED = 820;
 const DASH_DURATION = 0.14;
 const DASH_COOLDOWN = 0.45;
 const DASH_VERTICAL_SCALE = 0.5;
+const DASH_UPWARD_HORIZONTAL_SCALE = 0.3;
 
 k.setGravity(1600);
 
@@ -112,8 +113,8 @@ makePlatform(0, groundY, groundMids);
 
 const MOVES = [
   { dyMin: 95, dyMax: 120, dxMin: 20, dxMax: 105 },
-  { dyMin: 95, dyMax: 108, dxMin: 125, dxMax: 148 },
-  { dyMin: 140, dyMax: 182, dxMin: 180, dxMax: 225 },
+  { dyMin: 99, dyMax: 102, dxMin: 243, dxMax: 249 },
+  { dyMin: 140, dyMax: 165, dxMin: 150, dxMax: 190 },
 ];
 const MIN_MID = 3;
 const MAX_MID = 8;
@@ -231,7 +232,8 @@ k.onKeyPress("k", () => {
   if (dx === 0 && dy < 0) return;
 
   const aim = dx === 0 && dy === 0 ? k.vec2(facing, 0) : k.vec2(dx, dy).unit();
-  dashDir = k.vec2(aim.x, aim.y * DASH_VERTICAL_SCALE);
+  const hScale = aim.y < 0 ? DASH_UPWARD_HORIZONTAL_SCALE : 1;
+  dashDir = k.vec2(aim.x * hScale, aim.y * DASH_VERTICAL_SCALE);
   if (dashDir.x !== 0) facing = dashDir.x > 0 ? 1 : -1;
 
   dashReady = false;
@@ -316,10 +318,43 @@ const TICKER_STORY_GAP = 32;
 const TICKER_PADDING_RATIO = 0.012;
 const TICKER_PADDING = Math.round(k.width() * TICKER_PADDING_RATIO);
 
+const TICKER_REVEAL_RADIUS = 270;
+const TICKER_REVEAL_ALPHA = 0.25;
+
+k.loadShader(
+  "tickerReveal",
+  null,
+  `
+uniform vec2 u_circlePos;
+uniform float u_circleRadius;
+uniform vec2 u_resolution;
+
+vec4 frag(vec2 pos, vec2 uv, vec4 color, sampler2D tex) {
+  vec4 c = def_frag();
+  vec2 screenPos = vec2(
+    (pos.x * 0.5 + 0.5) * u_resolution.x,
+    (1.0 - (pos.y * 0.5 + 0.5)) * u_resolution.y
+  );
+  float d = distance(screenPos, u_circlePos);
+  float t = smoothstep(u_circleRadius, u_circleRadius - 24.0, d);
+  return c * mix(1.0, ${TICKER_REVEAL_ALPHA}, t);
+}
+`,
+);
+
+function tickerRevealUniform() {
+  return {
+    u_circlePos: player.screenPos(),
+    u_circleRadius: TICKER_REVEAL_RADIUS,
+    u_resolution: k.vec2(k.width(), k.height()),
+  };
+}
+
 k.add([
   k.rect(TICKER_WIDTH, k.height()),
   k.pos(k.width() - TICKER_WIDTH, 0),
   k.color(255, 255, 255),
+  k.shader("tickerReveal", tickerRevealUniform),
   k.fixed(),
   k.z(50),
 ]);
@@ -383,10 +418,20 @@ function renderStoryBitmap(story) {
   return { dataUrl: canvas.toDataURL(), height: canvas.height };
 }
 
-const stories =
+function shuffled(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+const stories = shuffled(
   Array.isArray(aitaTitles) && aitaTitles.length > 0
     ? aitaTitles
-    : FALLBACK_STORIES;
+    : FALLBACK_STORIES,
+);
 const storyBitmaps = stories.map((story, i) => {
   const { dataUrl, height } = renderStoryBitmap(story);
   const name = `tickerStory${i}`;
@@ -426,7 +471,11 @@ function syncTickerWindow() {
     if (visible && !activeItems.has(i)) {
       activeItems.set(
         i,
-        ticker.add([k.sprite(item.name), k.pos(0, item.y)]),
+        ticker.add([
+          k.sprite(item.name),
+          k.pos(0, item.y),
+          k.shader("tickerReveal", tickerRevealUniform),
+        ]),
       );
     } else if (!visible && activeItems.has(i)) {
       activeItems.get(i).destroy();
