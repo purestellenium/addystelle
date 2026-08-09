@@ -41,7 +41,8 @@ const DASH_SPEED = 820;
 const DASH_DURATION = 0.14;
 const DASH_COOLDOWN = 0.45;
 const DASH_VERTICAL_SCALE = 0.5;
-const DASH_UPWARD_HORIZONTAL_SCALE = 0.3;
+const DASH_UPWARD_HORIZONTAL_SCALE = 0.4;
+const DASH_HORIZONTAL_SCALE = 1.9;
 
 k.setGravity(1600);
 
@@ -98,11 +99,11 @@ function makePlatform(x, y, midCount) {
     ]);
   }
   platform.add([k.pos(w - EDGE_W * S, 0), k.sprite("groundRight"), k.scale(S)]);
-  return { platform, width: w };
+  return platform;
 }
 
 function makeFloatingPlatform(x, y, midCount) {
-  const { platform } = makePlatform(x, y, midCount);
+  const platform = makePlatform(x, y, midCount);
   platform.use("floating");
   return platform;
 }
@@ -112,9 +113,9 @@ const groundMids =
 makePlatform(0, groundY, groundMids);
 
 const MOVES = [
-  { dyMin: 95, dyMax: 120, dxMin: 20, dxMax: 105 },
-  { dyMin: 99, dyMax: 102, dxMin: 243, dxMax: 249 },
-  { dyMin: 140, dyMax: 165, dxMin: 150, dxMax: 190 },
+  { dyMin: 65, dyMax: 110, dxMin: 20, dxMax: 90 },
+  { dyMin: 130, dyMax: 175, dxMin: 150, dxMax: 195 },
+  { dyMin: 60, dyMax: 100, dxMin: 300, dxMax: 335 },
 ];
 const MIN_MID = 3;
 const MAX_MID = 8;
@@ -211,6 +212,9 @@ player.onUpdate(() => {
     if (player.isGrounded()) dashReady = true;
   }
 
+  if (player.pos.x < 0) player.pos.x += k.width();
+  else if (player.pos.x > k.width()) player.pos.x -= k.width();
+
   player.flipX = facing < 0;
   if (freezeTimer > 0 || dashTimer > 0) {
     setAnim("dash");
@@ -232,7 +236,9 @@ k.onKeyPress("k", () => {
   if (dx === 0 && dy < 0) return;
 
   const aim = dx === 0 && dy === 0 ? k.vec2(facing, 0) : k.vec2(dx, dy).unit();
-  const hScale = aim.y < 0 ? DASH_UPWARD_HORIZONTAL_SCALE : 1;
+  let hScale = 1;
+  if (aim.y < 0) hScale = DASH_UPWARD_HORIZONTAL_SCALE;
+  else if (aim.y === 0) hScale = DASH_HORIZONTAL_SCALE;
   dashDir = k.vec2(aim.x * hScale, aim.y * DASH_VERTICAL_SCALE);
   if (dashDir.x !== 0) facing = dashDir.x > 0 ? 1 : -1;
 
@@ -283,7 +289,9 @@ player.onUpdate(() => {
 });
 
 k.add([
-  k.text("A/D move, W/Space jump, K dash (aim with WASD)", { size: 18 }),
+  k.text("A/D move, W/Space jump, K dash (aim with WASD), M mute", {
+    size: 18,
+  }),
   k.pos(12, 12),
   k.color(40, 40, 40),
   k.fixed(),
@@ -295,8 +303,7 @@ const FALLBACK_STORIES = [
     text: "",
   },
   {
-    title:
-      "AITA for eating the last slice of pizza I'd labeled with my name?",
+    title: "AITA for eating the last slice of pizza I'd labeled with my name?",
     text: "",
   },
   {
@@ -305,7 +312,10 @@ const FALLBACK_STORIES = [
     text: "",
   },
   { title: "AITA for refusing to swap seats on a 3 hour flight?", text: "" },
-  { title: "AITA for skipping my cousin's fourth wedding this year?", text: "" },
+  {
+    title: "AITA for skipping my cousin's fourth wedding this year?",
+    text: "",
+  },
 ];
 
 const TICKER_WIDTH_RATIO = 0.3;
@@ -318,7 +328,12 @@ const TICKER_STORY_GAP = 32;
 const TICKER_PADDING_RATIO = 0.012;
 const TICKER_PADDING = Math.round(k.width() * TICKER_PADDING_RATIO);
 
-const TICKER_REVEAL_RADIUS = 270;
+const TTS_GROW = 1.6;
+const TTS_RATE = 0.95;
+const TTS_WORDS_PER_SEC = 3.2;
+const TTS_READ_TOP_RATIO = 0.25;
+
+const TICKER_REVEAL_RADIUS = 240;
 const TICKER_REVEAL_ALPHA = 0.25;
 
 k.loadShader(
@@ -359,12 +374,15 @@ k.add([
   k.z(50),
 ]);
 
-function renderStoryBitmap(story) {
+function renderStoryBitmap(story, fontScale) {
   const innerWidth = TICKER_WIDTH - TICKER_PADDING * 2;
-  const titleFont = `bold ${TICKER_TITLE_SIZE}px monospace`;
-  const bodyFont = `${TICKER_BODY_SIZE}px monospace`;
-  const titleLineH = Math.round(TICKER_TITLE_SIZE * 1.3);
-  const bodyLineH = Math.round(TICKER_BODY_SIZE * 1.4);
+  const titleSize = Math.round(TICKER_TITLE_SIZE * fontScale);
+  const bodySize = Math.round(TICKER_BODY_SIZE * fontScale);
+  const titleFont = `bold ${titleSize}px monospace`;
+  const bodyFont = `${bodySize}px monospace`;
+  const titleLineH = Math.round(titleSize * 1.3);
+  const bodyLineH = Math.round(bodySize * 1.4);
+  const titleBodyGap = Math.round(TICKER_TITLE_BODY_GAP * fontScale);
 
   const measurer = document.createElement("canvas").getContext("2d");
 
@@ -398,7 +416,7 @@ function renderStoryBitmap(story) {
     ops.push({ text: line, y, font: titleFont, color: "#000" });
   }
   if (story.text) {
-    y += TICKER_TITLE_BODY_GAP;
+    y += titleBodyGap;
     for (const line of wrap(story.text, bodyFont)) {
       y += bodyLineH;
       ops.push({ text: line, y, font: bodyFont, color: "#464646" });
@@ -432,12 +450,10 @@ const stories = shuffled(
     ? aitaTitles
     : FALLBACK_STORIES,
 );
-const storyBitmaps = stories.map((story, i) => {
-  const { dataUrl, height } = renderStoryBitmap(story);
-  const name = `tickerStory${i}`;
-  k.loadSprite(name, dataUrl);
-  return { name, height };
-});
+function countWords(story) {
+  return `${story.title} ${story.text}`.trim().split(/\s+/).filter(Boolean)
+    .length;
+}
 
 const ticker = k.add([
   k.pos(k.width() - TICKER_WIDTH, k.height()),
@@ -445,20 +461,36 @@ const ticker = k.add([
   k.z(51),
 ]);
 
-const items = [];
-{
-  let y = 0;
-  for (const bitmap of [...storyBitmaps, ...storyBitmaps]) {
-    items.push({ name: bitmap.name, height: bitmap.height, y });
-    y += bitmap.height + TICKER_STORY_GAP;
-  }
-}
-const tickerLoopHeight = items.length
-  ? items[items.length / 2].y
-  : 0;
-
 const TICKER_WINDOW_BUFFER = 200;
 const activeItems = new Map();
+let items = [];
+let tickerLoopHeight = 0;
+let bitmapGen = 0;
+
+function buildTicker(fontScale) {
+  for (const obj of activeItems.values()) obj.destroy();
+  activeItems.clear();
+  bitmapGen += 1;
+  const bitmaps = stories.map((story, i) => {
+    const { dataUrl, height } = renderStoryBitmap(story, fontScale);
+    const name = `story_${bitmapGen}_${i}`;
+    k.loadSprite(name, dataUrl);
+    return { name, height, words: countWords(story) };
+  });
+  const gap = Math.round(TICKER_STORY_GAP * fontScale);
+  items = [];
+  let y = 0;
+  for (const bitmap of [...bitmaps, ...bitmaps]) {
+    items.push({
+      name: bitmap.name,
+      height: bitmap.height,
+      words: bitmap.words,
+      y,
+    });
+    y += bitmap.height + gap;
+  }
+  tickerLoopHeight = items.length ? items[items.length / 2].y : 0;
+}
 
 function syncTickerWindow() {
   for (let i = 0; i < items.length; i++) {
@@ -483,12 +515,62 @@ function syncTickerWindow() {
     }
   }
 }
+
+buildTicker(1);
 syncTickerWindow();
 
+let scrollSpeed = TICKER_SPEED;
+let ttsStarted = false;
+let ttsMuted = false;
+let readIdx = 0;
+const storyCount = stories.length;
+
 ticker.onUpdate(() => {
-  ticker.pos.y -= TICKER_SPEED * k.dt();
+  ticker.pos.y -= scrollSpeed * k.dt();
   if (ticker.pos.y <= k.height() - tickerLoopHeight) {
     ticker.pos.y += tickerLoopHeight;
   }
   syncTickerWindow();
+});
+
+function speakStory(i) {
+  const story = stories[i];
+  const text = story.text ? `${story.title}. ${story.text}` : story.title;
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.rate = TTS_RATE;
+  utterance.onstart = () => {
+    ticker.pos.y = Math.round(k.height() * TTS_READ_TOP_RATIO) - items[i].y;
+    const duration = Math.max(2, items[i].words / TTS_WORDS_PER_SEC);
+    const gap = Math.round(TICKER_STORY_GAP * TTS_GROW);
+    scrollSpeed = (items[i].height + gap) / duration;
+  };
+  utterance.onend = () => {
+    if (ttsMuted) return;
+    readIdx = (i + 1) % storyCount;
+    speakStory(readIdx);
+  };
+  window.speechSynthesis.speak(utterance);
+}
+
+function startReading() {
+  if (ttsStarted) return;
+  ttsStarted = true;
+  buildTicker(TTS_GROW);
+  readIdx = 0;
+  speakStory(0);
+}
+
+k.onKeyPress(() => startReading());
+k.onKeyPress("m", () => {
+  ttsMuted = !ttsMuted;
+  if (ttsMuted) window.speechSynthesis.cancel();
+  else if (ttsStarted) speakStory(readIdx);
+});
+
+k.loop(8, () => {
+  const synth = window.speechSynthesis;
+  if (ttsStarted && !ttsMuted && synth.speaking) {
+    synth.pause();
+    synth.resume();
+  }
 });
