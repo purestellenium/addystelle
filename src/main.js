@@ -30,10 +30,8 @@ k.loadSprite("groundMid", "sprites/groundMid.png");
 k.loadSprite("groundRight", "sprites/groundRight.png");
 
 const MOVE_SPEED = 240;
-const SPEED_GAIN = 250; // full bonus run speed, reached at the coin cap
 const SPEED_CAP_COINS = 20; // coins past this add nothing
 const SPEED_CURVE_K = 0.5; // curve shape: bigger gains at the start & end, small mid
-let moveSpeed = MOVE_SPEED; // grows as coins are collected
 const JUMP_FORCE = 640;
 
 const COYOTE_TIME = 0.1;
@@ -214,7 +212,7 @@ player.onUpdate(() => {
     spawnDashGhost();
   } else {
     player.gravityScale = 1;
-    player.vel.x = dir * moveSpeed;
+    player.vel.x = dir * MOVE_SPEED;
     if (player.vel.y > MAX_VEL) player.vel.y = MAX_VEL;
     if (player.isGrounded()) dashReady = true;
   }
@@ -328,20 +326,22 @@ const FALLBACK_STORIES = [
   },
 ];
 
-const TICKER_WIDTH_RATIO = 0.3;
+const TICKER_WIDTH_RATIO = 0.35;
 const TICKER_WIDTH = Math.round(k.width() * TICKER_WIDTH_RATIO);
 const TICKER_SPEED = 30;
 const TICKER_TITLE_SIZE = 30;
 const TICKER_BODY_SIZE = 20;
 const TICKER_TITLE_BODY_GAP = 8;
 const TICKER_STORY_GAP = 32;
-const TICKER_PADDING_RATIO = 0.012;
+const TICKER_PADDING_RATIO = 0.05;
 const TICKER_PADDING = Math.round(k.width() * TICKER_PADDING_RATIO);
 
 const TICKER_FONT_SCALE = 1.3;
 
 const TICKER_REVEAL_RADIUS = 180;
 const TICKER_REVEAL_ALPHA = 0.25;
+const TICKER_REVEAL_SOFT = 48; // reveal circle falloff width (px)
+const TICKER_EDGE_FADE = 40; // ticker's left edge fades in over this many px
 
 k.loadShader(
   "tickerReveal",
@@ -358,8 +358,10 @@ vec4 frag(vec2 pos, vec2 uv, vec4 color, sampler2D tex) {
     (1.0 - (pos.y * 0.5 + 0.5)) * u_resolution.y
   );
   float d = distance(screenPos, u_circlePos);
-  float t = smoothstep(u_circleRadius, u_circleRadius - 24.0, d);
-  return c * mix(1.0, ${TICKER_REVEAL_ALPHA}, t);
+  float t = smoothstep(u_circleRadius, u_circleRadius - ${TICKER_REVEAL_SOFT}.0, d);
+  float edgeLeft = u_resolution.x - ${TICKER_WIDTH}.0;
+  float edge = smoothstep(edgeLeft, edgeLeft + ${TICKER_EDGE_FADE}.0, screenPos.x);
+  return c * mix(1.0, ${TICKER_REVEAL_ALPHA}, t) * edge;
 }
 `,
 );
@@ -535,8 +537,8 @@ const TICKER_LEFT = k.width() - TICKER_WIDTH;
 let secrets = 0;
 
 // Coin power 0..1 vs coins collected: steep at the start & end, shallow through
-// the middle, and flat once past SPEED_CAP_COINS. Drives run speed, dash reach,
-// and the aura so they all share the same curve.
+// the middle, and flat once past SPEED_CAP_COINS. Drives dash reach and the
+// aura so they share the same curve.
 function coinPower() {
   const t = Math.min(secrets, SPEED_CAP_COINS) / SPEED_CAP_COINS;
   return t + (SPEED_CURVE_K / (2 * Math.PI)) * Math.sin(2 * Math.PI * t);
@@ -599,7 +601,6 @@ player.onCollide("gem", (gem) => {
   const at = gem.pos.clone();
   gem.destroy();
   secrets += 1;
-  moveSpeed = MOVE_SPEED + SPEED_GAIN * coinPower();
   aura.hidden = false;
   k.shake(4);
   for (let i = 0; i < 10; i++) {
