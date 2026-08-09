@@ -330,7 +330,7 @@ const TICKER_PADDING = Math.round(k.width() * TICKER_PADDING_RATIO);
 
 const TTS_GROW = 1.6;
 const TTS_RATE = 0.95;
-const TTS_WORDS_PER_SEC = 3.2;
+const TTS_WORDS_PER_SEC = 3.1;
 const TTS_READ_TOP_RATIO = 0.25;
 
 const TICKER_REVEAL_RADIUS = 240;
