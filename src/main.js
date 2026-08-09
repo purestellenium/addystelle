@@ -28,10 +28,24 @@ const TILE_H = 30;
 k.loadSprite("groundLeft", "sprites/groundLeft.png");
 k.loadSprite("groundMid", "sprites/groundMid.png");
 k.loadSprite("groundRight", "sprites/groundRight.png");
+for (const b of ["snow", "sand", "autumn"]) {
+  for (const part of ["Left", "Mid", "Right"]) {
+    k.loadSprite(`${b}${part}`, `sprites/${b}${part}.png`);
+  }
+}
+const BIOMES = ["ground", "snow", "sand", "autumn"];
+const BIOME_PLATFORMS = 30;
+const BIOME_BG = {
+  ground: [135, 206, 235],
+  snow: [136, 100, 147],
+  sand: [135, 206, 235],
+  autumn: [136, 100, 147],
+};
 
 const MOVE_SPEED = 240;
-const SPEED_CAP_COINS = 20; // coins past this add nothing
-const SPEED_CURVE_K = 0.5; // curve shape: bigger gains at the start & end, small mid
+const SPEED_COIN_GAIN = 250;
+const SPEED_CAP_COINS = 20;
+const SPEED_CURVE_K = 0.5;
 const JUMP_FORCE = 640;
 
 const COYOTE_TIME = 0.1;
@@ -45,11 +59,12 @@ const DASH_COOLDOWN = 0.45;
 const DASH_VERTICAL_SCALE = 0.5;
 const DASH_UPWARD_HORIZONTAL_SCALE = 0.4;
 const DASH_HORIZONTAL_SCALE = 1.9;
-const DASH_H_GAIN = 0.4; // coins boost horizontal dash reach (speed+scale), up to +40%
+const DASH_H_GAIN = 0.4;
 
 k.setGravity(1600);
 
 const PLATFORM_H = TILE_H * PLATFORM_SCALE;
+const BG_BOUNDARY_PAD = 28;
 const PLAYER_FEET = 32;
 const MAX_VEL = 1600;
 const groundY = k.height() - TILE_H * PLATFORM_SCALE;
@@ -74,7 +89,7 @@ function setAnim(name) {
   }
 }
 
-function makePlatform(x, y, midCount) {
+function makePlatform(x, y, midCount, biome = "ground") {
   const S = PLATFORM_SCALE;
   const w = (EDGE_W * 2 + MID_W * midCount) * S;
   const platform = k.add([
@@ -94,20 +109,24 @@ function makePlatform(x, y, midCount) {
     const prevFeet = p.pos.y + PLAYER_FEET - p.vel.y * k.dt();
     if (prevFeet > platform.pos.y + 4) col.preventResolution();
   });
-  platform.add([k.pos(0, 0), k.sprite("groundLeft"), k.scale(S)]);
+  platform.add([k.pos(0, 0), k.sprite(`${biome}Left`), k.scale(S)]);
   for (let i = 0; i < midCount; i++) {
     platform.add([
       k.pos((EDGE_W + i * MID_W) * S, 0),
-      k.sprite("groundMid"),
+      k.sprite(`${biome}Mid`),
       k.scale(S),
     ]);
   }
-  platform.add([k.pos(w - EDGE_W * S, 0), k.sprite("groundRight"), k.scale(S)]);
+  platform.add([
+    k.pos(w - EDGE_W * S, 0),
+    k.sprite(`${biome}Right`),
+    k.scale(S),
+  ]);
   return platform;
 }
 
-function makeFloatingPlatform(x, y, midCount) {
-  const platform = makePlatform(x, y, midCount);
+function makeFloatingPlatform(x, y, midCount, biome) {
+  const platform = makePlatform(x, y, midCount, biome);
   platform.use("floating");
   return platform;
 }
@@ -123,13 +142,20 @@ const MOVES = [
 ];
 const MIN_MID = 3;
 const MAX_MID = 8;
-const GEN_LOOKAHEAD = k.height() + 300; // always fill past the top of the view
+const GEN_LOOKAHEAD = k.height() + 300;
 
 let highestY = groundY;
 let prevX = k.width() / 2;
 let prevW = 0;
+let platformIndex = 0;
+
+let biomeBands = [{ y: groundY, biome: "ground" }];
 
 function spawnNextPlatform() {
+  const biome =
+    BIOMES[Math.floor(platformIndex / BIOME_PLATFORMS) % BIOMES.length];
+  platformIndex += 1;
+
   const move = MOVES[Math.floor(Math.random() * MOVES.length)];
   const midCount =
     MIN_MID + Math.floor(Math.random() * (MAX_MID - MIN_MID + 1));
@@ -140,6 +166,10 @@ function spawnNextPlatform() {
   );
   const dx = move.dxMin + Math.random() * (move.dxMax - move.dxMin);
   highestY -= dy;
+
+  if (biomeBands[biomeBands.length - 1].biome !== biome) {
+    biomeBands.push({ y: highestY + PLATFORM_H + BG_BOUNDARY_PAD, biome });
+  }
 
   const minX = 20;
   const maxX = k.width() - newW - 20;
@@ -153,7 +183,7 @@ function spawnNextPlatform() {
   else if (canLeft) x = xLeft;
   else x = Math.max(minX, Math.min(maxX, xRight));
 
-  makeFloatingPlatform(x, highestY, midCount);
+  makeFloatingPlatform(x, highestY, midCount, biome);
   prevX = x;
   prevW = newW;
 }
@@ -163,6 +193,8 @@ function regeneratePlatforms() {
   highestY = groundY;
   prevX = k.width() / 2;
   prevW = 0;
+  platformIndex = 0;
+  biomeBands = [{ y: groundY, biome: "ground" }];
   while (highestY > player.pos.y - GEN_LOOKAHEAD) spawnNextPlatform();
 }
 
@@ -173,6 +205,47 @@ k.onUpdate(() => {
     spawnNextPlatform();
   }
 });
+
+function bgColorAt(worldY) {
+  let idx = 0;
+  for (let i = 0; i < biomeBands.length; i++) {
+    if (biomeBands[i].y >= worldY) idx = i;
+    else break;
+  }
+  return BIOME_BG[biomeBands[idx].biome];
+}
+k.add([
+  k.pos(0, 0),
+  k.z(-1000),
+  {
+    draw() {
+      const M = 120;
+      const W = k.width();
+      const H = k.height();
+      const camY = k.getCamPos().y;
+      const top = camY - H / 2 - M;
+      const bot = camY + H / 2 + M;
+      const edges = [];
+      for (let i = 1; i < biomeBands.length; i++) {
+        const by = biomeBands[i].y;
+        if (by > top && by < bot) edges.push(by);
+      }
+      edges.sort((a, b) => a - b);
+      edges.push(bot);
+      let y = top;
+      for (const edge of edges) {
+        const c = bgColorAt((y + edge) / 2);
+        k.drawRect({
+          pos: k.vec2(-M, y),
+          width: W + M * 2,
+          height: edge - y + 1,
+          color: k.rgb(c[0], c[1], c[2]),
+        });
+        y = edge;
+      }
+    },
+  },
+]);
 
 let facing = 1;
 let dashVel = k.vec2(0, 0);
@@ -212,7 +285,7 @@ player.onUpdate(() => {
     spawnDashGhost();
   } else {
     player.gravityScale = 1;
-    player.vel.x = dir * MOVE_SPEED;
+    player.vel.x = dir * (MOVE_SPEED + SPEED_COIN_GAIN * coinPower());
     if (player.vel.y > MAX_VEL) player.vel.y = MAX_VEL;
     if (player.isGrounded()) dashReady = true;
   }
@@ -244,7 +317,7 @@ k.onKeyPress("k", () => {
   let hScale = 1;
   if (aim.y < 0) hScale = DASH_UPWARD_HORIZONTAL_SCALE;
   else if (aim.y === 0) hScale = DASH_HORIZONTAL_SCALE;
-  // Coins boost the horizontal dash (speed + scale) only; vertical is untouched.
+
   const hBoost = 1 + DASH_H_GAIN * coinPower();
   dashVel = k.vec2(
     aim.x * hScale * DASH_SPEED * hBoost,
@@ -340,8 +413,8 @@ const TICKER_FONT_SCALE = 1.3;
 
 const TICKER_REVEAL_RADIUS = 180;
 const TICKER_REVEAL_ALPHA = 0.25;
-const TICKER_REVEAL_SOFT = 48; // reveal circle falloff width (px)
-const TICKER_EDGE_FADE = 40; // ticker's left edge fades in over this many px
+const TICKER_REVEAL_SOFT = 48;
+const TICKER_EDGE_FADE = 40;
 
 k.loadShader(
   "tickerReveal",
@@ -527,25 +600,14 @@ ticker.onUpdate(() => {
   syncTickerWindow();
 });
 
-// --- Behind-the-veil secrets ---
-// The gameplay world is full-width; the ticker just draws over the right third.
-// So there's a whole region hidden behind the drama wall — invisible under the
-// opaque ticker, seen only through the reveal "hole" the shader cuts around the
-// player. We stash glowing gems back there: climbing behind the noise to grab
-// them is the hook.
 const TICKER_LEFT = k.width() - TICKER_WIDTH;
 let secrets = 0;
 
-// Coin power 0..1 vs coins collected: steep at the start & end, shallow through
-// the middle, and flat once past SPEED_CAP_COINS. Drives dash reach and the
-// aura so they share the same curve.
 function coinPower() {
   const t = Math.min(secrets, SPEED_CAP_COINS) / SPEED_CAP_COINS;
   return t + (SPEED_CURVE_K / (2 * Math.PI)) * Math.sin(2 * Math.PI * t);
 }
 
-// Coin power is shown as a glowing aura around the player that grows with each
-// coin (sqrt so it keeps growing but doesn't explode). Hidden until you have one.
 const AURA_BASE = 30;
 const AURA_RANGE = 95;
 const AURA_RX = 16;
@@ -639,14 +701,10 @@ function spawnGem(x, y) {
   });
 }
 
-// Gem placement stays inside the ticker's solid area: past the left gradient
-// (edge fade) and off the far right edge, with room for the gem's own size
-// (rotated 18px square + outline + scale pulse ≈ 20px half-extent).
 const GEM_HALF = 20;
 const GEM_MIN_X = TICKER_LEFT + TICKER_EDGE_FADE + GEM_HALF;
 const GEM_MAX_X = k.width() - GEM_HALF;
 
-// Put a gem on each platform that reaches behind the ticker, once.
 k.onUpdate(() => {
   for (const p of k.get("floating")) {
     if (p.gemDecided) continue;
