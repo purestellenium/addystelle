@@ -544,21 +544,79 @@ function coinPower() {
 
 // Coin power is shown as a glowing aura around the player that grows with each
 // coin (sqrt so it keeps growing but doesn't explode). Hidden until you have one.
-const AURA_BASE = 34;
+const AURA_BASE = 30;
 const AURA_RANGE = 95;
+const AURA_RX = 16;
+const AURA_RY = 18;
+const AURA_GROW_RATE = 0.015;
+const AURA_SPIKES = 900;
+const AURA_SPIKE_AMOUNT = 0.85;
+const AURA_FRAMES = 8;
+const AURA_TILE = 200;
+
+function drawAuraFrame(ctx, cx, cy, phase) {
+  const maxR = Math.max(AURA_RX, AURA_RY) * (1 + AURA_SPIKE_AMOUNT);
+  const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, maxR);
+  grad.addColorStop(0, "rgba(255,238,170,0.95)");
+  grad.addColorStop(0.4, "rgba(255,200,60,0.8)");
+  grad.addColorStop(1, "rgba(255,130,10,0)");
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  const N = 72;
+  for (let i = 0; i <= N; i++) {
+    const angle = (i / N) * Math.PI * 2;
+    const upFactor = Math.max(0, -Math.sin(angle));
+    const spike =
+      1 +
+      AURA_SPIKE_AMOUNT *
+        (0.5 + 0.5 * Math.sin(angle * AURA_SPIKES + phase)) *
+        (0.3 + 0.7 * upFactor);
+    const x = cx + Math.cos(angle) * AURA_RX * spike;
+    const y = cy + Math.sin(angle) * AURA_RY * spike;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.fill();
+}
+
+function buildAuraSpritesheet() {
+  const canvas = document.createElement("canvas");
+  canvas.width = AURA_TILE * AURA_FRAMES;
+  canvas.height = AURA_TILE;
+  const ctx = canvas.getContext("2d");
+  for (let f = 0; f < AURA_FRAMES; f++) {
+    drawAuraFrame(
+      ctx,
+      AURA_TILE * f + AURA_TILE / 2,
+      AURA_TILE / 2 + 8,
+      (f / AURA_FRAMES) * Math.PI * 2,
+    );
+  }
+  return canvas.toDataURL();
+}
+
+k.loadSprite("aura", buildAuraSpritesheet(), {
+  sliceX: AURA_FRAMES,
+  sliceY: 1,
+  anims: { flicker: { from: 0, to: AURA_FRAMES - 1, loop: true, speed: 14 } },
+});
+
 const aura = k.add([
-  k.circle(AURA_BASE),
+  k.sprite("aura", { anim: "flicker" }),
   k.pos(player.pos.clone()),
   k.anchor("center"),
   k.color(255, 214, 96),
-  k.opacity(0.3),
-  k.z(9),
+  k.opacity(0.65),
+  k.z(-1),
 ]);
 aura.hidden = true;
+let auraGrowth = 0;
 aura.onUpdate(() => {
   aura.pos = player.pos.clone();
-  const r = AURA_BASE + AURA_RANGE * coinPower();
-  aura.radius = r * (1 + Math.sin(k.time() * 5) * 0.06);
+  const targetGrowth = (AURA_BASE + AURA_RANGE * coinPower()) / AURA_BASE;
+  auraGrowth = k.lerp(auraGrowth, targetGrowth, AURA_GROW_RATE);
+  aura.scale = k.vec2(auraGrowth * (1 + Math.sin(k.time() * 5) * 0.06));
 });
 
 function spawnGem(x, y) {
